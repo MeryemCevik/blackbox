@@ -89,13 +89,13 @@ async function hashFrame(frameBlob) {
 }
 
 async function saveHashToDB(hash) {
-  const { data, error } = await supabase
-    .from("frame_hashes")
-    .insert([{ timestamp: Date.now(), hash }]);
-
-  if (error) console.error("Erreur save hash :", error);
-  else console.log("Hash sauvegardé :", data);
-}
+    const { data, error } = await supabase
+      .from("frame_hashes")
+      .insert([{ hash }]);  // plus besoin de timestamp
+    if (error) console.error("Erreur save hash :", error);
+    else console.log("Hash sauvegardé :", data);
+  }
+  
 
 // -------------------
 // 5️⃣ Boucle capture continue
