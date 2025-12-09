@@ -12,9 +12,10 @@ let recordedBlob = null;
 async function initCamera() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment" },
-      audio: false
+        video: { facingMode: "environment" },
+        audio: false
     });
+      
 
     videoEl.srcObject = stream;
 
