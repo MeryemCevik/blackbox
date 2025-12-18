@@ -9,9 +9,10 @@ let recordedChunks = [];
 let recordedBlob = null;
 let captureInterval;
 let isRecording = false;
+let frameIndex = 0;
 
 const FRAME_INTERVAL = 100; // 10 fps
-const FRAME_REDUNDANCY = 3; // Envoi chaque frame 3 fois pour redondance
+const FRAME_REDUNDANCY = 3; // Redondance de frames
 
 const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d");
@@ -32,7 +33,7 @@ async function initCamera() {
 
     videoEl.srcObject = stream;
     
-    // Options pour MediaRecorder
+    // Options MediaRecorder
     const options = {
       mimeType: 'video/webm;codecs=vp9',
       videoBitsPerSecond: 2500000
@@ -45,22 +46,21 @@ async function initCamera() {
     mediaRecorder.onstop = () => {
       recordedBlob = new Blob(recordedChunks, { type: 'video/webm' });
       uploadBtn.disabled = false;
-      console.log("Enregistrement terminé, taille:", recordedBlob.size);
+      console.log("Enregistrement terminé");
     };
 
   } catch (e) {
-    alert("Impossible d'accéder à la caméra : " + e.message);
+    alert("Erreur caméra : " + e.message);
     console.error(e);
   }
 }
 initCamera();
 
 // -------------------
-// 2️⃣ Capture frame optimisée
+// 2️⃣ Capture frame
 // -------------------
-function captureFrame(videoEl) {
+function captureFrame() {
   if (!videoEl.videoWidth || !videoEl.videoHeight) {
-    console.warn("Dimensions vidéo non disponibles");
     return null;
   }
   
@@ -68,158 +68,165 @@ function captureFrame(videoEl) {
   canvas.height = videoEl.videoHeight;
   ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
   
-  // Qualité réduite pour optimisation
-  return canvas.toDataURL("image/jpeg", 0.5);
+  return canvas.toDataURL("image/jpeg", 0.7);
 }
 
 // -------------------
-// 3️⃣ Calcul de hash MD5 (plus robuste)
+// 3️⃣ Calcul SHA-256
 // -------------------
-async function calculateHash(blob) {
+async function calculateSHA256(dataURL) {
   try {
-    // Utilisation de l'API SubtleCrypto pour un hash plus fiable
+    // Convertir DataURL en ArrayBuffer
+    const response = await fetch(dataURL);
+    const blob = await response.blob();
     const buffer = await blob.arrayBuffer();
+    
+    // Calculer hash SHA-256
     const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   } catch (error) {
     console.error("Erreur calcul hash:", error);
-    // Fallback: hash simple basé sur les données
-    return 'fallback_' + blob.size + '_' + Date.now();
+    // Fallback simple
+    return 'hash_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
   }
 }
 
 // -------------------
-// 4️⃣ Upload frame + hash avec redondance
+// 4️⃣ Upload frame vers Supabase Storage
 // -------------------
-async function uploadFrame(frameDataURL, frameIndex) {
-  if (!frameDataURL) return null;
-  
-  const blob = dataURLtoBlob(frameDataURL);
-  const timestamp = Date.now();
-  const sessionId = localStorage.getItem('recording_session_id') || `session_${timestamp}`;
-  
-  if (!localStorage.getItem('recording_session_id')) {
-    localStorage.setItem('recording_session_id', sessionId);
-  }
-  
-  // Calculer le hash
-  const hash = await calculateHash(blob);
-  
+async function uploadToStorage(dataURL, sessionId, frameNum) {
   try {
-    // Upload de la frame avec nom unique
-    const frameName = `frames/${sessionId}/frame_${timestamp}_${frameIndex}.jpg`;
-    const { error: uploadError } = await supabase.storage
+    // Convertir DataURL en Blob
+    const response = await fetch(dataURL);
+    const blob = await response.blob();
+    
+    // Nom unique pour le fichier
+    const timestamp = Date.now();
+    const fileName = `${sessionId}/frame_${timestamp}_${frameNum}.jpg`;
+    
+    // Upload vers Supabase Storage
+    const { data, error } = await supabase.storage
       .from("videos")
-      .upload(frameName, blob, { 
-        upsert: true,
-        contentType: 'image/jpeg'
+      .upload(fileName, blob, {
+        contentType: 'image/jpeg',
+        upsert: false
       });
     
-    if (uploadError) {
-      console.error("Erreur upload frame:", uploadError);
+    if (error) {
+      console.error("Erreur upload storage:", error);
       return null;
     }
     
-    // Enregistrement du hash avec metadata
-    const { error: dbError } = await supabase
-      .from("frame_hashes")
-      .insert([{ 
-        hash, 
-        timestamp,
-        session_id: sessionId,
-        frame_index: frameIndex,
-        frame_path: frameName
-      }]);
-    
-    if (dbError) {
-      console.error("Erreur insertion hash:", dbError);
-    }
-    
-    console.log(`Frame ${frameIndex} uploadée, hash: ${hash.substring(0, 16)}...`);
-    return { hash, timestamp, frameName };
+    console.log("Frame uploadée:", fileName);
+    return fileName;
     
   } catch (error) {
-    console.error("Erreur dans uploadFrame:", error);
+    console.error("Erreur dans uploadToStorage:", error);
     return null;
   }
 }
 
 // -------------------
-// 5️⃣ Conversion DataURL → Blob
+// 5️⃣ Sauvegarde hash dans la table frame_hashes
 // -------------------
-function dataURLtoBlob(dataURL) {
+async function saveHashToDatabase(hash, storagePath) {
   try {
-    const byteString = atob(dataURL.split(',')[1]);
-    const mimeString = dataURL.split(',')[0].split(':')[1].split(';')[0];
-    const ab = new ArrayBuffer(byteString.length);
-    const ia = new Uint8Array(ab);
+    const { error } = await supabase
+      .from("frame_hashes")
+      .insert([
+        {
+          hash: hash,
+          timestamp: Date.now(),
+          frame_path: storagePath
+          // created_at sera automatiquement ajouté par Supabase
+        }
+      ]);
     
-    for (let i = 0; i < byteString.length; i++) {
-      ia[i] = byteString.charCodeAt(i);
+    if (error) {
+      console.error("Erreur insertion hash:", error);
+      return false;
     }
     
-    return new Blob([ab], { type: mimeString });
+    return true;
+    
   } catch (error) {
-    console.error("Erreur conversion DataURL:", error);
-    return new Blob([]);
+    console.error("Erreur dans saveHashToDatabase:", error);
+    return false;
   }
 }
 
 // -------------------
-// 6️⃣ Capture continue avec redondance
+// 6️⃣ Processus complet pour une frame
+// -------------------
+async function processFrame(dataURL, sessionId) {
+  if (!dataURL) return;
+  
+  // Calculer le hash
+  const hash = await calculateSHA256(dataURL);
+  
+  // Upload vers storage
+  const storagePath = await uploadToStorage(dataURL, sessionId, frameIndex);
+  
+  if (storagePath) {
+    // Sauvegarder dans la table frame_hashes
+    await saveHashToDatabase(hash, storagePath);
+    console.log(`Frame ${frameIndex} traitée, hash: ${hash.substring(0, 16)}...`);
+  }
+  
+  frameIndex++;
+}
+
+// -------------------
+// 7️⃣ Capture continue
 // -------------------
 function startFrameCapture() {
-  let frameIndex = 0;
+  const sessionId = `session_${Date.now()}`;
+  localStorage.setItem('current_session', sessionId);
   
   captureInterval = setInterval(async () => {
-    if (!videoEl.videoWidth) return;
-    
-    const frameDataURL = captureFrame(videoEl);
+    const frameDataURL = captureFrame();
     if (!frameDataURL) return;
     
-    // Upload avec redondance (multiple uploads de la même frame)
+    // Upload avec redondance
     for (let i = 0; i < FRAME_REDUNDANCY; i++) {
-      await uploadFrame(frameDataURL, frameIndex);
-      await new Promise(resolve => setTimeout(resolve, 10)); // Petit délai entre les uploads
+      await processFrame(frameDataURL, sessionId);
+      await new Promise(resolve => setTimeout(resolve, 50));
     }
-    
-    frameIndex++;
     
   }, FRAME_INTERVAL);
 }
 
 function stopFrameCapture() {
   clearInterval(captureInterval);
+  frameIndex = 0;
 }
 
 // -------------------
-// 7️⃣ Gestion boutons
+// 8️⃣ Gestion boutons
 // -------------------
 recordBtn.onclick = async () => {
   if (!isRecording) {
-    // Démarrer l'enregistrement
+    // Démarrer
     recordedChunks = [];
-    const sessionId = `session_${Date.now()}`;
-    localStorage.setItem('recording_session_id', sessionId);
     
     try {
-      mediaRecorder.start(1000); // Collecte des données chaque seconde
+      mediaRecorder.start(1000);
       startFrameCapture();
-      recordBtn.textContent = "Arrêter enregistrement";
+      recordBtn.textContent = "⏹️ Arrêter";
       recordBtn.style.backgroundColor = "#ff4444";
       isRecording = true;
       uploadBtn.disabled = true;
       
-      console.log("Enregistrement démarré, session:", sessionId);
+      console.log("Enregistrement démarré");
     } catch (error) {
-      console.error("Erreur démarrage enregistrement:", error);
+      console.error("Erreur démarrage:", error);
     }
   } else {
-    // Arrêter l'enregistrement
+    // Arrêter
     mediaRecorder.stop();
     stopFrameCapture();
-    recordBtn.textContent = "Démarrer enregistrement";
+    recordBtn.textContent = "▶️ Démarrer";
     recordBtn.style.backgroundColor = "";
     isRecording = false;
     
@@ -233,34 +240,26 @@ uploadBtn.onclick = async () => {
     return;
   }
   
-  const sessionId = localStorage.getItem('recording_session_id') || `session_${Date.now()}`;
   const timestamp = Date.now();
+  const sessionId = localStorage.getItem('current_session') || `session_${timestamp}`;
   
   try {
     const { error } = await supabase.storage
       .from("videos")
-      .upload(`videos/${sessionId}/video_${timestamp}.webm`, recordedBlob, {
+      .upload(`${sessionId}/video_${timestamp}.webm`, recordedBlob, {
         contentType: 'video/webm'
       });
     
     if (error) {
       alert("Erreur upload vidéo : " + error.message);
-      console.error(error);
     } else {
-      alert("Vidéo brute envoyée avec succès !");
+      alert("✅ Vidéo envoyée avec succès !");
       
-      // Mettre à jour la base de données avec l'info vidéo
-      await supabase
-        .from("video_records")
-        .insert([{
-          session_id: sessionId,
-          video_path: `videos/${sessionId}/video_${timestamp}.webm`,
-          timestamp,
-          duration: recordedChunks.length * 1000 // Estimation
-        }]);
+      // Optionnel: enregistrer dans une table si vous en créez une
+      // await supabase.from("video_records").insert([...]);
     }
   } catch (error) {
     console.error("Erreur:", error);
-    alert("Erreur lors de l'envoi de la vidéo");
+    alert("Erreur lors de l'envoi");
   }
 };
