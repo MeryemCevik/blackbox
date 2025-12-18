@@ -9,103 +9,89 @@ let recordedChunks = [];
 let recordedBlob = null;
 let captureInterval;
 
-const FRAME_INTERVAL = 100; // 100ms pour + de précision (10 fps)
+const FRAME_INTERVAL = 300; // même fréquence que le décodeur
 
-// Création d'un canvas pour capturer frames
+// Canvas pour capture
 const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d");
 
 // -------------------
-// 1️⃣ Initialisation caméra
+// Initialisation caméra
 // -------------------
 async function initCamera() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment" },
-      audio: false // vidéo silencieuse
-    });
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: "environment" },
+    audio: false
+  });
 
-    videoEl.srcObject = stream;
+  videoEl.srcObject = stream;
 
-    mediaRecorder = new MediaRecorder(stream);
-
-    mediaRecorder.ondataavailable = e => recordedChunks.push(e.data);
-
-    mediaRecorder.onstop = () => {
-      recordedBlob = new Blob(recordedChunks, { type: "video/mp4" });
-      uploadBtn.disabled = false;
-    };
-
-  } catch (e) {
-    alert("Impossible d'accéder à la caméra : " + e.message);
-  }
+  mediaRecorder = new MediaRecorder(stream);
+  mediaRecorder.ondataavailable = e => recordedChunks.push(e.data);
+  mediaRecorder.onstop = () => {
+    recordedBlob = new Blob(recordedChunks, { type: "video/mp4" });
+    uploadBtn.disabled = false;
+  };
 }
 
 initCamera();
 
 // -------------------
-// 2️⃣ Capture frames
+// Capture frame
 // -------------------
-function captureFrame(videoEl) {
+function captureFrame() {
   canvas.width = videoEl.videoWidth;
   canvas.height = videoEl.videoHeight;
-  ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+  ctx.drawImage(videoEl, 0, 0);
   return canvas.toDataURL("image/jpeg", 0.7);
 }
 
-function dataURLtoBlob(dataURL) {
-  const [header, base64] = dataURL.split(',');
-  const binary = atob(base64);
-  const array = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) array[i] = binary.charCodeAt(i);
-  return new Blob([array], { type: "image/jpeg" });
+// -------------------
+// aHash perceptuel
+// -------------------
+async function aHashFromDataURL(dataURL) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.src = dataURL;
+    img.onload = () => {
+      const c = document.createElement("canvas");
+      const ctx = c.getContext("2d");
+      c.width = 8;
+      c.height = 8;
+
+      ctx.drawImage(img, 0, 0, 8, 8);
+      const data = ctx.getImageData(0, 0, 8, 8).data;
+
+      const gray = [];
+      for (let i = 0; i < data.length; i += 4) {
+        gray.push((data[i] + data[i + 1] + data[i + 2]) / 3);
+      }
+
+      const avg = gray.reduce((a, b) => a + b, 0) / gray.length;
+
+      const hash = gray.map(v => (v >= avg ? "1" : "0")).join("");
+      resolve(hash);
+    };
+  });
 }
 
 // -------------------
-// 3️⃣ Upload frame sur Supabase
+// Sauvegarde hash
 // -------------------
-async function uploadFrame(frameDataURL) {
-  const blob = dataURLtoBlob(frameDataURL);
-  const timestamp = Date.now();
-  const { data, error } = await supabase.storage
-    .from("videos")
-    .upload(`frames/frame_${timestamp}.jpg`, blob);
-
-  if (error) console.error("Erreur upload frame :", error);
-  else console.log("Frame upload réussie :", data.path);
-
-  return blob;
+async function saveHashToDB(hash, timestamp) {
+  await supabase.from("frame_hashes").insert([
+    { hash, timestamp }
+  ]);
 }
 
 // -------------------
-// 4️⃣ Génération hash SHA-256
-// -------------------
-async function hashFrame(frameBlob) {
-  const arrayBuffer = await frameBlob.arrayBuffer();
-  const hashBuffer = await crypto.subtle.digest("SHA-256", arrayBuffer);
-  return [...new Uint8Array(hashBuffer)]
-    .map(b => b.toString(16).padStart(2, "0"))
-    .join('');
-}
-
-async function saveHashToDB(hash) {
-    const { data, error } = await supabase
-      .from("frame_hashes")
-      .insert([{ hash }]);  // plus besoin de timestamp
-    if (error) console.error("Erreur save hash :", error);
-    else console.log("Hash sauvegardé :", data);
-  }
-  
-
-// -------------------
-// 5️⃣ Boucle capture continue
+// Boucle capture
 // -------------------
 function startFrameCapture() {
   captureInterval = setInterval(async () => {
-    const frameDataURL = captureFrame(videoEl);
-    const blob = await uploadFrame(frameDataURL);
-    const hash = await hashFrame(blob);
-    await saveHashToDB(hash);
+    const frame = captureFrame();
+    const hash = await aHashFromDataURL(frame);
+    await saveHashToDB(hash, Date.now());
   }, FRAME_INTERVAL);
 }
 
@@ -114,31 +100,28 @@ function stopFrameCapture() {
 }
 
 // -------------------
-// 6️⃣ Gestion boutons
+// Bouton record
 // -------------------
 recordBtn.onclick = () => {
   if (mediaRecorder.state === "inactive") {
     recordedChunks = [];
     mediaRecorder.start();
-    startFrameCapture(); // capture frames
+    startFrameCapture();
     recordBtn.textContent = "Arrêter enregistrement";
   } else {
     mediaRecorder.stop();
-    stopFrameCapture(); // arrêt capture frames
+    stopFrameCapture();
     recordBtn.textContent = "Démarrer enregistrement";
   }
 };
 
 // -------------------
-// 7️⃣ Upload vidéo brute (optionnel)
+// Upload vidéo brute
 // -------------------
 uploadBtn.onclick = async () => {
-  if (!recordedBlob) return;
-  const timestamp = Date.now();
-  const { data, error } = await supabase.storage
+  const { error } = await supabase.storage
     .from("videos")
-    .upload(`video_${timestamp}.mp4`, recordedBlob);
+    .upload(`video_${Date.now()}.mp4`, recordedBlob);
 
-  if (error) alert("Erreur upload vidéo : " + error.message);
-  else alert("Vidéo brute envoyée avec succès !");
+  if (!error) alert("Vidéo envoyée");
 };
