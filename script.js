@@ -9,7 +9,8 @@ let recordedChunks = [];
 let recordedBlob = null;
 let captureInterval;
 
-const FRAME_INTERVAL = 100; // 10 fps
+const FRAME_INTERVAL = 200; // 5 fps pour test rapide
+const CANVAS_SIZE = 32;     // Redimension pour hash visuel
 
 const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d");
@@ -19,11 +20,7 @@ const ctx = canvas.getContext("2d");
 // -------------------
 async function initCamera() {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment" },
-      audio: false
-    });
-
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
     videoEl.srcObject = stream;
 
     mediaRecorder = new MediaRecorder(stream);
@@ -32,7 +29,6 @@ async function initCamera() {
       recordedBlob = new Blob(recordedChunks, { type: "video/mp4" });
       uploadBtn.disabled = false;
     };
-
   } catch (e) {
     alert("Impossible d'accéder à la caméra : " + e.message);
   }
@@ -49,9 +45,6 @@ function captureFrame(videoEl) {
   return canvas.toDataURL("image/jpeg", 0.7);
 }
 
-// -------------------
-// 3️⃣ DataURL → Blob
-// -------------------
 function dataURLtoBlob(dataURL) {
   const [header, base64] = dataURL.split(',');
   const binary = atob(base64);
@@ -61,38 +54,43 @@ function dataURLtoBlob(dataURL) {
 }
 
 // -------------------
-// 4️⃣ aHash simple
+// 3️⃣ Hash visuel simplifié (pixels en niveaux de gris)
 // -------------------
-async function aHashFromBlob(blob) {
-  const img = new Image();
-  const url = URL.createObjectURL(blob);
-  img.src = url;
-  await new Promise(res => img.onload = res);
-
-  const c = document.createElement("canvas");
-  const ctx = c.getContext("2d");
-  c.width = 8; c.height = 8;
-  ctx.drawImage(img, 0, 0, 8, 8);
-
-  const data = ctx.getImageData(0, 0, 8, 8).data;
-  const gray = [];
-  for (let i = 0; i < data.length; i += 4) gray.push((data[i] + data[i+1] + data[i+2])/3);
-  const avg = gray.reduce((a,b)=>a+b,0)/gray.length;
-  return gray.map(v => v >= avg ? "1" : "0").join('');
+async function visualHash(blob) {
+  return new Promise(resolve => {
+    const img = new Image();
+    const url = URL.createObjectURL(blob);
+    img.src = url;
+    img.onload = () => {
+      const c = document.createElement("canvas");
+      c.width = CANVAS_SIZE;
+      c.height = CANVAS_SIZE;
+      const ctx = c.getContext("2d");
+      ctx.drawImage(img, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
+      const data = ctx.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE).data;
+      const gray = [];
+      for (let i = 0; i < data.length; i += 4) {
+        gray.push((data[i] + data[i+1] + data[i+2])/3);
+      }
+      const avg = gray.reduce((a,b)=>a+b,0)/gray.length;
+      const hash = gray.map(v => v >= avg ? "1":"0").join('');
+      resolve(hash);
+    };
+  });
 }
 
 // -------------------
-// 5️⃣ Upload frame + hash
+// 4️⃣ Upload frame + hash + timestamp
 // -------------------
 async function uploadFrame(frameDataURL) {
   const blob = dataURLtoBlob(frameDataURL);
   const timestamp = Date.now();
   const { data, error } = await supabase.storage
     .from("videos")
-    .upload(`frames/frame_${timestamp}.jpg`, blob, { upsert: true });
+    .upload(`frames/frame_${timestamp}.jpg`, blob, { upsert:true });
   if (error) console.error("Upload frame:", error);
-  
-  const hash = await aHashFromBlob(blob);
+
+  const hash = await visualHash(blob);
   const { error: dbError } = await supabase
     .from("frame_hashes")
     .insert([{ hash, timestamp }]);
@@ -102,7 +100,7 @@ async function uploadFrame(frameDataURL) {
 }
 
 // -------------------
-// 6️⃣ Capture continue
+// 5️⃣ Capture continue
 // -------------------
 function startFrameCapture() {
   captureInterval = setInterval(async () => {
@@ -116,7 +114,7 @@ function stopFrameCapture() {
 }
 
 // -------------------
-// 7️⃣ Gestion boutons
+// 6️⃣ Gestion boutons
 // -------------------
 recordBtn.onclick = () => {
   if (mediaRecorder.state === "inactive") {
