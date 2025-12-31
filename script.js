@@ -3,17 +3,11 @@ import { supabase } from "./supabaseClient.js";
 const videoEl = document.getElementById("preview");
 const recordBtn = document.getElementById("recordBtn");
 const uploadBtn = document.getElementById("uploadBtn");
+const statusDiv = document.getElementById("status");
 
 let mediaRecorder;
 let chunks = [];
 let videoBlob;
-let intervalId;
-
-const FRAME_INTERVAL = 500; // Capture toutes les 0.5 sec pour hash
-const CANVAS_SIZE = 32;
-
-const canvas = document.createElement("canvas");
-const ctx = canvas.getContext("2d");
 
 // ---------------- Camera ----------------
 async function initCamera() {
@@ -29,7 +23,7 @@ async function initCamera() {
     mediaRecorder.onstop = () => {
       videoBlob = new Blob(chunks, { type: "video/mp4" });
       uploadBtn.disabled = false;
-      console.log("Vidéo prête à être uploadée.");
+      statusDiv.textContent = "Vidéo enregistrée, prête à uploader.";
     };
   } catch (e) {
     alert("Impossible d'accéder à la caméra : " + e.message);
@@ -38,84 +32,50 @@ async function initCamera() {
 
 initCamera();
 
-// ---------------- Capture frame ----------------
-function captureFrame() {
-  canvas.width = videoEl.videoWidth;
-  canvas.height = videoEl.videoHeight;
-  ctx.drawImage(videoEl, 0, 0);
-  return canvas.toDataURL("image/jpeg", 0.7);
+// ---------------- SHA256 ----------------
+async function sha256(blob) {
+  const buffer = await blob.arrayBuffer();
+  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+  return Array.from(new Uint8Array(hashBuffer)).map(b=>b.toString(16).padStart(2,"0")).join("");
 }
 
-function dataURLtoBlob(dataURL) {
-  const bin = atob(dataURL.split(",")[1]);
-  const arr = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-  return new Blob([arr], { type: "image/jpeg" });
-}
+// ---------------- Upload vidéo + hash ----------------
+uploadBtn.onclick = async () => {
+  if(!videoBlob) return;
 
-// ---------------- Visual Hash ----------------
-async function visualHash(blob) {
-  return new Promise(resolve => {
-    const img = new Image();
-    img.src = URL.createObjectURL(blob);
-    img.onload = () => {
-      const c = document.createElement("canvas");
-      c.width = CANVAS_SIZE;
-      c.height = CANVAS_SIZE;
-      const ctx = c.getContext("2d");
-      ctx.drawImage(img, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
-      const data = ctx.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE).data;
-      const gray = [];
-      for (let i = 0; i < data.length; i += 4) {
-        gray.push((data[i]+data[i+1]+data[i+2])/3);
-      }
-      const avg = gray.reduce((a,b)=>a+b,0)/gray.length;
-      const hash = gray.map(v => v >= avg ? "1" : "0").join('');
-      resolve(hash);
-    };
-  });
-}
+  const timestamp = Date.now();
+  const videoName = `video_${timestamp}.mp4`;
+  statusDiv.textContent = "Upload en cours...";
 
-// ---------------- Upload hash ----------------
-async function uploadHash(blob) {
-  const hash = await visualHash(blob);
-  const { error } = await supabase.from("frame_hashes").insert([{ hash }]);
-  if (error) console.error("Erreur upload hash :", error);
-  else console.log("Hash enregistré :", hash);
-}
+  // 1️⃣ Upload vidéo brute
+  let { error: uploadError } = await supabase.storage.from("videos").upload(videoName, videoBlob);
+  if(uploadError){
+    statusDiv.textContent = "Erreur upload vidéo : " + uploadError.message;
+    return;
+  }
 
-// ---------------- Capture et upload hashes ----------------
-function startHashCapture() {
-  intervalId = setInterval(async () => {
-    const frameDataURL = captureFrame();
-    const blob = dataURLtoBlob(frameDataURL);
-    await uploadHash(blob);
-  }, FRAME_INTERVAL);
-}
+  // 2️⃣ Calcul hash
+  const hash = await sha256(videoBlob);
 
-function stopHashCapture() {
-  clearInterval(intervalId);
-}
+  // 3️⃣ Stocker hash dans Supabase
+  const { error: hashError } = await supabase.from("frame_hashes").insert([{ hash }]);
+  if(hashError){
+    statusDiv.textContent = "Erreur stockage hash : " + hashError.message;
+    return;
+  }
 
-// ---------------- Bouton Record ----------------
+  statusDiv.textContent = `Vidéo et hash enregistrés ! Hash: ${hash}`;
+};
+
+// ---------------- Record bouton ----------------
 recordBtn.onclick = () => {
-  if (mediaRecorder.state === "inactive") {
+  if(mediaRecorder.state === "inactive"){
     chunks = [];
     mediaRecorder.start();
-    startHashCapture();
+    statusDiv.textContent = "Enregistrement en cours...";
     recordBtn.textContent = "Arrêter enregistrement";
   } else {
     mediaRecorder.stop();
-    stopHashCapture();
     recordBtn.textContent = "Démarrer enregistrement";
   }
-};
-
-// ---------------- Upload vidéo brute ----------------
-uploadBtn.onclick = async () => {
-  if (!videoBlob) return;
-  const name = `video_${Date.now()}.mp4`;
-  const { error } = await supabase.storage.from("videos").upload(name, videoBlob);
-  if (error) alert("Erreur upload vidéo : " + error.message);
-  else alert("Vidéo brute envoyée !");
 };
