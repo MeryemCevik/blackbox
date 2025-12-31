@@ -9,7 +9,7 @@ let chunks = [];
 let videoBlob;
 let intervalId;
 
-const FRAME_INTERVAL = 500; // capture toutes les 0.5 sec
+const FRAME_INTERVAL = 500; // Capture toutes les 0.5 sec pour hash
 const CANVAS_SIZE = 32;
 
 const canvas = document.createElement("canvas");
@@ -29,7 +29,7 @@ async function initCamera() {
     mediaRecorder.onstop = () => {
       videoBlob = new Blob(chunks, { type: "video/mp4" });
       uploadBtn.disabled = false;
-      console.log("Enregistrement terminé, vidéo prête à être uploadée.");
+      console.log("Vidéo prête à être uploadée.");
     };
   } catch (e) {
     alert("Impossible d'accéder à la caméra : " + e.message);
@@ -76,48 +76,37 @@ async function visualHash(blob) {
   });
 }
 
-// ---------------- Upload frame ----------------
-async function uploadFrame() {
-  const frameDataURL = captureFrame();
-  const blob = dataURLtoBlob(frameDataURL);
-  console.log("Taille du blob :", blob.size);
-
-  const filename = `frames_${Date.now()}.jpg`; // Préfixe frames_
-
-  try {
-    const { error } = await supabase.storage.from("videos").upload(filename, blob, { upsert: true });
-    if (error) console.error("Erreur upload frame :", error);
-    else console.log("Frame uploadée :", filename);
-
-    const hash = await visualHash(blob);
-    const { error: dbError } = await supabase.from("frame_hashes").insert([{ hash }]);
-    if (dbError) console.error("Erreur upload hash :", dbError);
-    else console.log("Hash enregistré :", hash);
-
-  } catch(e) {
-    console.error("Erreur lors de l'upload de la frame :", e.message);
-  }
+// ---------------- Upload hash ----------------
+async function uploadHash(blob) {
+  const hash = await visualHash(blob);
+  const { error } = await supabase.from("frame_hashes").insert([{ hash }]);
+  if (error) console.error("Erreur upload hash :", error);
+  else console.log("Hash enregistré :", hash);
 }
 
-// ---------------- Start / Stop capture ----------------
-function startFrameCapture() {
-  intervalId = setInterval(uploadFrame, FRAME_INTERVAL);
+// ---------------- Capture et upload hashes ----------------
+function startHashCapture() {
+  intervalId = setInterval(async () => {
+    const frameDataURL = captureFrame();
+    const blob = dataURLtoBlob(frameDataURL);
+    await uploadHash(blob);
+  }, FRAME_INTERVAL);
 }
 
-function stopFrameCapture() {
+function stopHashCapture() {
   clearInterval(intervalId);
 }
 
-// ---------------- Record button ----------------
+// ---------------- Bouton Record ----------------
 recordBtn.onclick = () => {
   if (mediaRecorder.state === "inactive") {
     chunks = [];
     mediaRecorder.start();
-    startFrameCapture();
+    startHashCapture();
     recordBtn.textContent = "Arrêter enregistrement";
   } else {
     mediaRecorder.stop();
-    stopFrameCapture();
+    stopHashCapture();
     recordBtn.textContent = "Démarrer enregistrement";
   }
 };
