@@ -36,7 +36,9 @@ initCamera();
 async function sha256(blob) {
   const buffer = await blob.arrayBuffer();
   const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
-  return Array.from(new Uint8Array(hashBuffer)).map(b=>b.toString(16).padStart(2,"0")).join("");
+  return Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 // ---------------- Capture frame ----------------
@@ -53,7 +55,7 @@ function startFrameCapture() {
     const blob = await captureFrame();
     framesBuffer.push(blob);
     const hash = await sha256(blob);
-    frameHashes.push({ hash });  // plus de timestamp
+    frameHashes.push({ hash });  // stockage des hashes sans timestamp
   }, FRAME_INTERVAL);
 }
 
@@ -63,31 +65,40 @@ function stopFrameCapture() {
 
 // ---------------- Upload ----------------
 uploadBtn.onclick = async () => {
-  if(!videoBlob) return;
+  if (!videoBlob) return;
   statusDiv.textContent = "Upload en cours...";
 
-  // 1️⃣ Upload vidéo brute
   const timestamp = Date.now();
+
+  // 1️⃣ Upload vidéo brute
   const videoName = `video_${timestamp}.mp4`;
   const { error: videoError } = await supabase.storage.from("videos").upload(videoName, videoBlob);
-  if(videoError){ statusDiv.textContent = "Erreur upload vidéo : "+videoError.message; return; }
-
-  // 2️⃣ Upload frames + hashes
-  for(let i=0;i<framesBuffer.length;i++){
-    const frameName = `frames/frame_${timestamp}_${i}.jpg`;
-    const { error: frameError } = await supabase.storage.from("videos").upload(frameName, framesBuffer[i]);
-    if(frameError) console.error("Erreur upload frame:", frameError);
+  if (videoError) { 
+    statusDiv.textContent = "Erreur upload vidéo : " + videoError.message; 
+    return; 
   }
 
+  // 2️⃣ Upload frames
+  for (let i = 0; i < framesBuffer.length; i++) {
+    const frameName = `frames/frame_${timestamp}_${i}.jpg`;
+    const { error: frameError } = await supabase.storage.from("videos").upload(frameName, framesBuffer[i]);
+    if (frameError) console.error("Erreur upload frame:", frameError);
+  }
+
+  // 3️⃣ Stocker hashes
   const { error: hashError } = await supabase.from("frame_hashes").insert(frameHashes);
-  if(hashError){ console.error("Erreur hash:", hashError); statusDiv.textContent="Erreur stockage hash"; return; }
+  if (hashError) { 
+    console.error("Erreur hash:", hashError); 
+    statusDiv.textContent = "Erreur stockage hash"; 
+    return; 
+  }
 
   statusDiv.textContent = "Vidéo, frames et hashes uploadés !";
 };
 
 // ---------------- Record bouton ----------------
 recordBtn.onclick = () => {
-  if(mediaRecorder.state === "inactive"){
+  if (mediaRecorder.state === "inactive") {
     chunks = [];
     frameHashes = [];
     framesBuffer = [];
