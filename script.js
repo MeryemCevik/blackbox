@@ -1,6 +1,6 @@
 import { supabase } from "./supabaseClient.js";
 
-const video = document.getElementById("preview");
+const videoEl = document.getElementById("preview");
 const recordBtn = document.getElementById("recordBtn");
 const uploadBtn = document.getElementById("uploadBtn");
 
@@ -10,19 +10,19 @@ let videoBlob;
 let intervalId;
 
 const FRAME_INTERVAL = 300;
-const HASH_SIZE = 32;
 
+// ---------------- Canvas ----------------
 const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d");
 
-// ---------------- CAMERA ----------------
+// ---------------- Camera ----------------
 async function initCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: "environment" },
     audio: false
   });
 
-  video.srcObject = stream;
+  videoEl.srcObject = stream;
 
   mediaRecorder = new MediaRecorder(stream);
   mediaRecorder.ondataavailable = e => chunks.push(e.data);
@@ -34,11 +34,11 @@ async function initCamera() {
 
 initCamera();
 
-// ---------------- FRAME ----------------
+// ---------------- Convert DataURL -> Blob ----------------
 function captureFrame() {
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  ctx.drawImage(video, 0, 0);
+  canvas.width = videoEl.videoWidth;
+  canvas.height = videoEl.videoHeight;
+  ctx.drawImage(videoEl, 0, 0);
   return canvas.toDataURL("image/jpeg", 0.7);
 }
 
@@ -49,47 +49,27 @@ function dataURLtoBlob(dataURL) {
   return new Blob([arr], { type: "image/jpeg" });
 }
 
-// ---------------- HASH ----------------
-async function visualHash(blob) {
-  return new Promise(resolve => {
-    const img = new Image();
-    img.src = URL.createObjectURL(blob);
-    img.onload = () => {
-      const c = document.createElement("canvas");
-      c.width = HASH_SIZE;
-      c.height = HASH_SIZE;
-      const cx = c.getContext("2d");
-      cx.drawImage(img, 0, 0, HASH_SIZE, HASH_SIZE);
-      const d = cx.getImageData(0, 0, HASH_SIZE, HASH_SIZE).data;
-
-      let gray = [];
-      for (let i = 0; i < d.length; i += 4)
-        gray.push((d[i] + d[i+1] + d[i+2]) / 3);
-
-      const avg = gray.reduce((a,b)=>a+b,0)/gray.length;
-      resolve(gray.map(v => v >= avg ? "1" : "0").join(""));
-    };
-  });
+// ---------------- SHA256 ----------------
+async function sha256(blob) {
+  const buffer = await blob.arrayBuffer();
+  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+  return Array.from(new Uint8Array(hashBuffer)).map(b=>b.toString(16).padStart(2,"0")).join("");
 }
 
-// ---------------- UPLOAD ----------------
+// ---------------- Upload frame ----------------
 async function uploadFrame() {
   const frame = captureFrame();
   const blob = dataURLtoBlob(frame);
   const filename = `frames/frame_${Date.now()}.jpg`;
 
-  await supabase.storage
-    .from("videos")
-    .upload(filename, blob, { upsert: true });
+  await supabase.storage.from("videos").upload(filename, blob, { upsert: true });
 
-  const hash = await visualHash(blob);
+  const hash = await sha256(blob);
 
-  await supabase
-    .from("frame_hashes")
-    .insert([{ hash }]);
+  await supabase.from("frame_hashes").insert([{ hash }]);
 }
 
-// ---------------- RECORD ----------------
+// ---------------- Record ----------------
 recordBtn.onclick = () => {
   if (mediaRecorder.state === "inactive") {
     chunks = [];
@@ -103,8 +83,10 @@ recordBtn.onclick = () => {
   }
 };
 
+// ---------------- Upload vidéo brute ----------------
 uploadBtn.onclick = async () => {
+  if (!videoBlob) return;
   const name = `video_${Date.now()}.mp4`;
   await supabase.storage.from("videos").upload(name, videoBlob);
-  alert("Vidéo envoyée");
+  alert("Vidéo brute envoyée !");
 };
