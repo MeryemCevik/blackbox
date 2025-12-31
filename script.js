@@ -53,7 +53,7 @@ function startFrameCapture() {
     const blob = await captureFrame();
     framesBuffer.push(blob);
     const hash = await sha256(blob);
-    frameHashes.push({ hash, timestamp: Date.now() });
+    frameHashes.push({ hash });  // plus de timestamp
   }, FRAME_INTERVAL);
 }
 
