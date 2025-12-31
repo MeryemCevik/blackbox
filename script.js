@@ -10,8 +10,8 @@ let videoBlob;
 let intervalId;
 
 const FRAME_INTERVAL = 300;
+const CANVAS_SIZE = 32;
 
-// ---------------- Canvas ----------------
 const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d");
 
@@ -34,7 +34,7 @@ async function initCamera() {
 
 initCamera();
 
-// ---------------- Convert DataURL -> Blob ----------------
+// ---------------- Capture frame ----------------
 function captureFrame() {
   canvas.width = videoEl.videoWidth;
   canvas.height = videoEl.videoHeight;
@@ -49,11 +49,27 @@ function dataURLtoBlob(dataURL) {
   return new Blob([arr], { type: "image/jpeg" });
 }
 
-// ---------------- SHA256 ----------------
-async function sha256(blob) {
-  const buffer = await blob.arrayBuffer();
-  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
-  return Array.from(new Uint8Array(hashBuffer)).map(b=>b.toString(16).padStart(2,"0")).join("");
+// ---------------- Visual Hash ----------------
+async function visualHash(blob) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.src = URL.createObjectURL(blob);
+    img.onload = () => {
+      const c = document.createElement("canvas");
+      c.width = CANVAS_SIZE;
+      c.height = CANVAS_SIZE;
+      const ctx = c.getContext("2d");
+      ctx.drawImage(img, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
+      const data = ctx.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE).data;
+      const gray = [];
+      for (let i = 0; i < data.length; i += 4) {
+        gray.push((data[i] + data[i+1] + data[i+2])/3);
+      }
+      const avg = gray.reduce((a,b)=>a+b,0)/gray.length;
+      const hash = gray.map(v => v >= avg ? "1" : "0").join('');
+      resolve(hash);
+    };
+  });
 }
 
 // ---------------- Upload frame ----------------
@@ -63,9 +79,7 @@ async function uploadFrame() {
   const filename = `frames/frame_${Date.now()}.jpg`;
 
   await supabase.storage.from("videos").upload(filename, blob, { upsert: true });
-
-  const hash = await sha256(blob);
-
+  const hash = await visualHash(blob);
   await supabase.from("frame_hashes").insert([{ hash }]);
 }
 
