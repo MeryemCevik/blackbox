@@ -9,7 +9,7 @@ let chunks = [];
 let videoBlob;
 let intervalId;
 
-const FRAME_INTERVAL = 300;
+const FRAME_INTERVAL = 500; // capture toutes les 0.5 sec
 const CANVAS_SIZE = 32;
 
 const canvas = document.createElement("canvas");
@@ -17,19 +17,23 @@ const ctx = canvas.getContext("2d");
 
 // ---------------- Camera ----------------
 async function initCamera() {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: "environment" },
-    audio: false
-  });
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" },
+      audio: false
+    });
+    videoEl.srcObject = stream;
 
-  videoEl.srcObject = stream;
-
-  mediaRecorder = new MediaRecorder(stream);
-  mediaRecorder.ondataavailable = e => chunks.push(e.data);
-  mediaRecorder.onstop = () => {
-    videoBlob = new Blob(chunks, { type: "video/mp4" });
-    uploadBtn.disabled = false;
-  };
+    mediaRecorder = new MediaRecorder(stream);
+    mediaRecorder.ondataavailable = e => chunks.push(e.data);
+    mediaRecorder.onstop = () => {
+      videoBlob = new Blob(chunks, { type: "video/mp4" });
+      uploadBtn.disabled = false;
+      console.log("Enregistrement terminé, vidéo prête à être uploadée.");
+    };
+  } catch (e) {
+    alert("Impossible d'accéder à la caméra : " + e.message);
+  }
 }
 
 initCamera();
@@ -63,7 +67,7 @@ async function visualHash(blob) {
       const data = ctx.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE).data;
       const gray = [];
       for (let i = 0; i < data.length; i += 4) {
-        gray.push((data[i] + data[i+1] + data[i+2])/3);
+        gray.push((data[i]+data[i+1]+data[i+2])/3);
       }
       const avg = gray.reduce((a,b)=>a+b,0)/gray.length;
       const hash = gray.map(v => v >= avg ? "1" : "0").join('');
@@ -74,26 +78,47 @@ async function visualHash(blob) {
 
 // ---------------- Upload frame ----------------
 async function uploadFrame() {
-  const frame = captureFrame();
-  const blob = dataURLtoBlob(frame);
-  const filename = `frames/frame_${Date.now()}.jpg`;
+  const frameDataURL = captureFrame();
+  const blob = dataURLtoBlob(frameDataURL);
+  console.log("Taille du blob :", blob.size);
 
-  await supabase.storage.from("videos").upload(filename, blob, { upsert: true });
-  const hash = await visualHash(blob);
-  await supabase.from("frame_hashes").insert([{ hash }]);
+  const filename = `frames_${Date.now()}.jpg`; // Préfixe frames_
+
+  try {
+    const { error } = await supabase.storage.from("videos").upload(filename, blob, { upsert: true });
+    if (error) console.error("Erreur upload frame :", error);
+    else console.log("Frame uploadée :", filename);
+
+    const hash = await visualHash(blob);
+    const { error: dbError } = await supabase.from("frame_hashes").insert([{ hash }]);
+    if (dbError) console.error("Erreur upload hash :", dbError);
+    else console.log("Hash enregistré :", hash);
+
+  } catch(e) {
+    console.error("Erreur lors de l'upload de la frame :", e.message);
+  }
 }
 
-// ---------------- Record ----------------
+// ---------------- Start / Stop capture ----------------
+function startFrameCapture() {
+  intervalId = setInterval(uploadFrame, FRAME_INTERVAL);
+}
+
+function stopFrameCapture() {
+  clearInterval(intervalId);
+}
+
+// ---------------- Record button ----------------
 recordBtn.onclick = () => {
   if (mediaRecorder.state === "inactive") {
     chunks = [];
     mediaRecorder.start();
-    intervalId = setInterval(uploadFrame, FRAME_INTERVAL);
-    recordBtn.textContent = "Arrêter";
+    startFrameCapture();
+    recordBtn.textContent = "Arrêter enregistrement";
   } else {
     mediaRecorder.stop();
-    clearInterval(intervalId);
-    recordBtn.textContent = "Démarrer";
+    stopFrameCapture();
+    recordBtn.textContent = "Démarrer enregistrement";
   }
 };
 
@@ -101,6 +126,7 @@ recordBtn.onclick = () => {
 uploadBtn.onclick = async () => {
   if (!videoBlob) return;
   const name = `video_${Date.now()}.mp4`;
-  await supabase.storage.from("videos").upload(name, videoBlob);
-  alert("Vidéo brute envoyée !");
+  const { error } = await supabase.storage.from("videos").upload(name, videoBlob);
+  if (error) alert("Erreur upload vidéo : " + error.message);
+  else alert("Vidéo brute envoyée !");
 };
