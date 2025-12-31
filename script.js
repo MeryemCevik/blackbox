@@ -8,7 +8,6 @@ const statusDiv = document.getElementById("status");
 let mediaRecorder, chunks = [], videoBlob;
 let frameHashes = [];
 let framesBuffer = [];
-
 const FRAME_INTERVAL = 200; // ms
 const CANVAS_SIZE = 32;
 let captureInterval;
@@ -41,22 +40,20 @@ async function sha256(blob) {
     .join("");
 }
 
-// ---------------- Capture frame ----------------
-function captureFrame() {
+// ---------------- Capture et hash frame ----------------
+async function captureAndHashFrame() {
   canvas.width = videoEl.videoWidth;
   canvas.height = videoEl.videoHeight;
   ctx.drawImage(videoEl, 0, 0);
-  return new Promise(res => canvas.toBlob(res, "image/jpeg", 0.7));
+  const blob = await new Promise(res => canvas.toBlob(res, "image/jpeg", 0.7));
+  const hash = await sha256(blob);
+  framesBuffer.push(blob);
+  frameHashes.push({ hash });
 }
 
 // ---------------- Start / Stop capture frames ----------------
 function startFrameCapture() {
-  captureInterval = setInterval(async () => {
-    const blob = await captureFrame();
-    framesBuffer.push(blob);
-    const hash = await sha256(blob);
-    frameHashes.push({ hash });  // stockage des hashes sans timestamp
-  }, FRAME_INTERVAL);
+  captureInterval = setInterval(captureAndHashFrame, FRAME_INTERVAL);
 }
 
 function stopFrameCapture() {
@@ -73,24 +70,24 @@ uploadBtn.onclick = async () => {
   // 1️⃣ Upload vidéo brute
   const videoName = `video_${timestamp}.mp4`;
   const { error: videoError } = await supabase.storage.from("videos").upload(videoName, videoBlob);
-  if (videoError) { 
-    statusDiv.textContent = "Erreur upload vidéo : " + videoError.message; 
-    return; 
+  if (videoError) {
+    statusDiv.textContent = "Erreur upload vidéo : " + videoError.message;
+    return;
   }
 
-  // 2️⃣ Upload frames
+  // 2️⃣ Upload frames avec redondance
   for (let i = 0; i < framesBuffer.length; i++) {
     const frameName = `frames/frame_${timestamp}_${i}.jpg`;
     const { error: frameError } = await supabase.storage.from("videos").upload(frameName, framesBuffer[i]);
     if (frameError) console.error("Erreur upload frame:", frameError);
   }
 
-  // 3️⃣ Stocker hashes
+  // 3️⃣ Stocker les hashes dans Supabase
   const { error: hashError } = await supabase.from("frame_hashes").insert(frameHashes);
-  if (hashError) { 
-    console.error("Erreur hash:", hashError); 
-    statusDiv.textContent = "Erreur stockage hash"; 
-    return; 
+  if (hashError) {
+    console.error("Erreur hash:", hashError);
+    statusDiv.textContent = "Erreur stockage hash";
+    return;
   }
 
   statusDiv.textContent = "Vidéo, frames et hashes uploadés !";
