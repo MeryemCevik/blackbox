@@ -2,25 +2,17 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>BlackBox - Capture Vidéo & Frames</title>
-  <link rel="stylesheet" href="styles.css">
+  <title>BlackBox - Encodeur</title>
 </head>
 <body>
 
 <h1>BlackBox – Capture Vidéo</h1>
 
-<div id="container">
+<video id="preview" autoplay muted playsinline></video>
+<br><br>
 
-  <!-- Prévisualisation vidéo silencieuse -->
-  <video id="preview" autoplay playsinline muted></video>
-
-  <!-- Bouton démarrer / arrêter enregistrement -->
-  <button id="recordBtn">Démarrer enregistrement</button>
-
-  <!-- Bouton upload vidéo brute (optionnel) -->
-  <button id="uploadBtn" disabled>Envoyer vidéo brute</button>
-
-</div>
+<button id="recordBtn">Démarrer</button>
+<button id="uploadBtn" disabled>Envoyer vidéo brute</button>
 
 <script type="module" src="script.js"></script>
 </body>

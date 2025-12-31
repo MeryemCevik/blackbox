@@ -1,140 +1,110 @@
 import { supabase } from "./supabaseClient.js";
 
-const videoEl = document.getElementById("preview");
+const video = document.getElementById("preview");
 const recordBtn = document.getElementById("recordBtn");
 const uploadBtn = document.getElementById("uploadBtn");
 
 let mediaRecorder;
-let recordedChunks = [];
-let recordedBlob = null;
-let captureInterval;
+let chunks = [];
+let videoBlob;
+let intervalId;
 
-const FRAME_INTERVAL = 200; // 5 fps pour test rapide
-const CANVAS_SIZE = 32;     // Redimension pour hash visuel
+const FRAME_INTERVAL = 300;
+const HASH_SIZE = 32;
 
 const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d");
 
-// -------------------
-// 1️⃣ Initialisation caméra
-// -------------------
+// ---------------- CAMERA ----------------
 async function initCamera() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
-    videoEl.srcObject = stream;
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: "environment" },
+    audio: false
+  });
 
-    mediaRecorder = new MediaRecorder(stream);
-    mediaRecorder.ondataavailable = e => recordedChunks.push(e.data);
-    mediaRecorder.onstop = () => {
-      recordedBlob = new Blob(recordedChunks, { type: "video/mp4" });
-      uploadBtn.disabled = false;
-    };
-  } catch (e) {
-    alert("Impossible d'accéder à la caméra : " + e.message);
-  }
+  video.srcObject = stream;
+
+  mediaRecorder = new MediaRecorder(stream);
+  mediaRecorder.ondataavailable = e => chunks.push(e.data);
+  mediaRecorder.onstop = () => {
+    videoBlob = new Blob(chunks, { type: "video/mp4" });
+    uploadBtn.disabled = false;
+  };
 }
+
 initCamera();
 
-// -------------------
-// 2️⃣ Capture frame
-// -------------------
-function captureFrame(videoEl) {
-  canvas.width = videoEl.videoWidth;
-  canvas.height = videoEl.videoHeight;
-  ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+// ---------------- FRAME ----------------
+function captureFrame() {
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  ctx.drawImage(video, 0, 0);
   return canvas.toDataURL("image/jpeg", 0.7);
 }
 
 function dataURLtoBlob(dataURL) {
-  const [header, base64] = dataURL.split(',');
-  const binary = atob(base64);
-  const array = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) array[i] = binary.charCodeAt(i);
-  return new Blob([array], { type: "image/jpeg" });
+  const bin = atob(dataURL.split(",")[1]);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: "image/jpeg" });
 }
 
-// -------------------
-// 3️⃣ Hash visuel simplifié (pixels en niveaux de gris)
-// -------------------
+// ---------------- HASH ----------------
 async function visualHash(blob) {
   return new Promise(resolve => {
     const img = new Image();
-    const url = URL.createObjectURL(blob);
-    img.src = url;
+    img.src = URL.createObjectURL(blob);
     img.onload = () => {
       const c = document.createElement("canvas");
-      c.width = CANVAS_SIZE;
-      c.height = CANVAS_SIZE;
-      const ctx = c.getContext("2d");
-      ctx.drawImage(img, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
-      const data = ctx.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE).data;
-      const gray = [];
-      for (let i = 0; i < data.length; i += 4) {
-        gray.push((data[i] + data[i+1] + data[i+2])/3);
-      }
+      c.width = HASH_SIZE;
+      c.height = HASH_SIZE;
+      const cx = c.getContext("2d");
+      cx.drawImage(img, 0, 0, HASH_SIZE, HASH_SIZE);
+      const d = cx.getImageData(0, 0, HASH_SIZE, HASH_SIZE).data;
+
+      let gray = [];
+      for (let i = 0; i < d.length; i += 4)
+        gray.push((d[i] + d[i+1] + d[i+2]) / 3);
+
       const avg = gray.reduce((a,b)=>a+b,0)/gray.length;
-      const hash = gray.map(v => v >= avg ? "1":"0").join('');
-      resolve(hash);
+      resolve(gray.map(v => v >= avg ? "1" : "0").join(""));
     };
   });
 }
 
-// -------------------
-// 4️⃣ Upload frame + hash + timestamp
-// -------------------
-async function uploadFrame(frameDataURL) {
-  const blob = dataURLtoBlob(frameDataURL);
-  const timestamp = Date.now();
-  const { data, error } = await supabase.storage
+// ---------------- UPLOAD ----------------
+async function uploadFrame() {
+  const frame = captureFrame();
+  const blob = dataURLtoBlob(frame);
+  const filename = `frames/frame_${Date.now()}.jpg`;
+
+  await supabase.storage
     .from("videos")
-    .upload(`frames/frame_${timestamp}.jpg`, blob, { upsert:true });
-  if (error) console.error("Upload frame:", error);
+    .upload(filename, blob, { upsert: true });
 
   const hash = await visualHash(blob);
-  const { error: dbError } = await supabase
+
+  await supabase
     .from("frame_hashes")
-    .insert([{ hash, timestamp }]);
-  if (dbError) console.error("Upload hash:", dbError);
-
-  return blob;
+    .insert([{ hash }]);
 }
 
-// -------------------
-// 5️⃣ Capture continue
-// -------------------
-function startFrameCapture() {
-  captureInterval = setInterval(async () => {
-    const frameDataURL = captureFrame(videoEl);
-    await uploadFrame(frameDataURL);
-  }, FRAME_INTERVAL);
-}
-
-function stopFrameCapture() {
-  clearInterval(captureInterval);
-}
-
-// -------------------
-// 6️⃣ Gestion boutons
-// -------------------
+// ---------------- RECORD ----------------
 recordBtn.onclick = () => {
   if (mediaRecorder.state === "inactive") {
-    recordedChunks = [];
+    chunks = [];
     mediaRecorder.start();
-    startFrameCapture();
-    recordBtn.textContent = "Arrêter enregistrement";
+    intervalId = setInterval(uploadFrame, FRAME_INTERVAL);
+    recordBtn.textContent = "Arrêter";
   } else {
     mediaRecorder.stop();
-    stopFrameCapture();
-    recordBtn.textContent = "Démarrer enregistrement";
+    clearInterval(intervalId);
+    recordBtn.textContent = "Démarrer";
   }
 };
 
 uploadBtn.onclick = async () => {
-  if (!recordedBlob) return;
-  const timestamp = Date.now();
-  const { error } = await supabase.storage
-    .from("videos")
-    .upload(`video_${timestamp}.mp4`, recordedBlob);
-  if (error) alert("Erreur upload vidéo : " + error.message);
-  else alert("Vidéo brute envoyée !");
+  const name = `video_${Date.now()}.mp4`;
+  await supabase.storage.from("videos").upload(name, videoBlob);
+  alert("Vidéo envoyée");
 };
