@@ -18,7 +18,6 @@ const ctx = canvas.getContext("2d");
 /* =====================================================
    Gestion des coupures réseau
 ===================================================== */
-
 function saveHashesLocally(hashes) {
   const existing = JSON.parse(localStorage.getItem("pending_hashes") || "[]");
   localStorage.setItem("pending_hashes", JSON.stringify(existing.concat(hashes)));
@@ -28,10 +27,9 @@ function clearLocalHashes() {
   localStorage.removeItem("pending_hashes");
 }
 
-// Dès que le réseau revient, on renvoie les hashes stockés
 window.addEventListener("online", async () => {
   const pending = JSON.parse(localStorage.getItem("pending_hashes") || "[]");
-  if (pending.length === 0) return;
+  if (!pending.length) return;
 
   try {
     const { error } = await supabase.from("frame_hashes").insert(pending);
@@ -47,7 +45,6 @@ window.addEventListener("online", async () => {
 /* =====================================================
    Camera
 ===================================================== */
-
 async function initCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: "environment" },
@@ -55,6 +52,15 @@ async function initCamera() {
   });
 
   videoEl.srcObject = stream;
+
+  // attendre que la vidéo soit prête pour récupérer les dimensions
+  await new Promise(resolve => {
+    videoEl.onloadedmetadata = () => {
+      canvas.width = videoEl.videoWidth || 320;
+      canvas.height = videoEl.videoHeight || 240;
+      resolve();
+    };
+  });
 
   mediaRecorder = new MediaRecorder(stream);
   mediaRecorder.ondataavailable = e => chunks.push(e.data);
@@ -70,7 +76,6 @@ initCamera();
 /* =====================================================
    SHA256
 ===================================================== */
-
 async function sha256(blob) {
   const buffer = await blob.arrayBuffer();
   const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
@@ -82,14 +87,17 @@ async function sha256(blob) {
 /* =====================================================
    Capture et hash frames
 ===================================================== */
-
 async function captureAndHashFrame() {
-  canvas.width = videoEl.videoWidth;
-  canvas.height = videoEl.videoHeight;
-  ctx.drawImage(videoEl, 0, 0);
+  // Dessiner la vidéo sur le canvas
+  ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+
+  // Convertir en blob
   const blob = await new Promise(res => canvas.toBlob(res, "image/jpeg", 0.7));
 
+  // Hash
   const hash = await sha256(blob);
+
+  // Ajouter aux buffers
   framesBuffer.push(blob);
   frameHashes.push({
     hash,
@@ -108,7 +116,6 @@ function stopFrameCapture() {
 /* =====================================================
    Upload
 ===================================================== */
-
 uploadBtn.onclick = async () => {
   if (!videoBlob) return;
   statusDiv.textContent = "Upload en cours...";
@@ -146,7 +153,6 @@ uploadBtn.onclick = async () => {
 /* =====================================================
    Record bouton
 ===================================================== */
-
 recordBtn.onclick = () => {
   if (mediaRecorder.state === "inactive") {
     chunks = [];
