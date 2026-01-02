@@ -3,19 +3,28 @@
 <head>
 <meta charset="UTF-8">
 <title>BlackBox - Capture Vidéo & Frames</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 
 <h1>BlackBox – Capture Vidéo</h1>
 
 <video id="preview" autoplay muted playsinline></video>
-<br><br>
+<br>
 
 <button id="recordBtn">Démarrer enregistrement</button>
 <button id="uploadBtn" disabled>Envoyer vidéo + frames</button>
 
 <div id="status"></div>
 
-<script type="module" src="script.js"></script>
+<div class="infoBox">
+  <p>Frames capturées : <span id="frameCount">0</span></p>
+  <p>Durée : <span id="recordTime">0</span> s</p>
+  <p>Vidéo uploadée : <span id="videoStatus">non</span></p>
+  <p>Statut réseau : <span id="networkStatus">en ligne</span></p>
+  <p class="status-warning">Alerte : Les données seront supprimées après 2h si l'accident n'est pas déclaré</p>
+</div>
+
+<script type="module" src="client.js"></script>
 </body>
 </html>
