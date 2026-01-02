@@ -11,13 +11,15 @@ let framesBuffer = [];
 const FRAME_INTERVAL = 200; // ms
 let captureInterval;
 
-// Canvas pour capture frames
+// Fixer une taille de canvas constante
+const CANVAS_WIDTH = 320;
+const CANVAS_HEIGHT = 240;
 const canvas = document.createElement("canvas");
+canvas.width = CANVAS_WIDTH;
+canvas.height = CANVAS_HEIGHT;
 const ctx = canvas.getContext("2d");
 
-/* =====================================================
-   Gestion des coupures réseau
-===================================================== */
+/* Gestion des coupures réseau */
 function saveHashesLocally(hashes) {
   const existing = JSON.parse(localStorage.getItem("pending_hashes") || "[]");
   localStorage.setItem("pending_hashes", JSON.stringify(existing.concat(hashes)));
@@ -42,25 +44,13 @@ window.addEventListener("online", async () => {
   }
 });
 
-/* =====================================================
-   Camera
-===================================================== */
+/* Camera */
 async function initCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: "environment" },
     audio: false
   });
-
   videoEl.srcObject = stream;
-
-  // attendre que la vidéo soit prête pour récupérer les dimensions
-  await new Promise(resolve => {
-    videoEl.onloadedmetadata = () => {
-      canvas.width = videoEl.videoWidth || 320;
-      canvas.height = videoEl.videoHeight || 240;
-      resolve();
-    };
-  });
 
   mediaRecorder = new MediaRecorder(stream);
   mediaRecorder.ondataavailable = e => chunks.push(e.data);
@@ -69,13 +59,16 @@ async function initCamera() {
     uploadBtn.disabled = false;
     statusDiv.textContent = "Vidéo enregistrée et frames prêtes.";
   };
+
+  // attendre que la vidéo soit jouable
+  await new Promise(resolve => {
+    videoEl.onplaying = () => resolve();
+  });
 }
 
 initCamera();
 
-/* =====================================================
-   SHA256
-===================================================== */
+/* SHA256 */
 async function sha256(blob) {
   const buffer = await blob.arrayBuffer();
   const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
@@ -84,20 +77,22 @@ async function sha256(blob) {
     .join("");
 }
 
-/* =====================================================
-   Capture et hash frames
-===================================================== */
+/* Capture et hash frames */
 async function captureAndHashFrame() {
-  ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-  const blob = await new Promise(res => canvas.toBlob(res, "image/jpeg", 0.7));
+  if (!videoEl.videoWidth || !videoEl.videoHeight) return;
+
+  // Dessiner la frame
+  ctx.drawImage(videoEl, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+  // Convertir en blob et attendre la fin
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.8));
   if (!blob || blob.size === 0) return; // éviter les blobs vides
 
   const hash = await sha256(blob);
   framesBuffer.push(blob);
-  frameHashes.push({
-    hash,
-    created_at: new Date().toISOString()
-  });
+  frameHashes.push({ hash, created_at: new Date().toISOString() });
+
+  console.log(`Frame capturée #${framesBuffer.length}, taille: ${blob.size}`);
 }
 
 function startFrameCapture() {
@@ -108,22 +103,17 @@ function stopFrameCapture() {
   clearInterval(captureInterval);
 }
 
-/* =====================================================
-   Upload
-===================================================== */
+/* Upload */
 uploadBtn.onclick = async () => {
   if (!videoBlob) return;
   statusDiv.textContent = "Upload en cours...";
-
   const timestamp = Date.now();
 
-  // 1️⃣ Upload vidéo brute
-  const videoName = `video_${timestamp}.mp4`;
-  const { error: videoError } = await supabase.storage.from("videos").upload(videoName, videoBlob, { upsert: true });
-  if (videoError) {
-    statusDiv.textContent = "Erreur upload vidéo : " + videoError.message;
-    return;
-  }
+  // 1️⃣ Upload vidéo
+  const { error: videoError } = await supabase.storage
+    .from("videos")
+    .upload(`video_${timestamp}.mp4`, videoBlob, { upsert: true });
+  if (videoError) return statusDiv.textContent = "Erreur upload vidéo : " + videoError.message;
 
   // 2️⃣ Upload frames
   for (let i = 0; i < framesBuffer.length; i++) {
@@ -134,7 +124,7 @@ uploadBtn.onclick = async () => {
     if (frameError) console.error("Erreur upload frame:", frameError);
   }
 
-  // 3️⃣ Stocker hashes avec gestion réseau
+  // 3️⃣ Stocker hashes
   try {
     const { error } = await supabase.from("frame_hashes").insert(frameHashes);
     if (error) throw error;
@@ -144,21 +134,17 @@ uploadBtn.onclick = async () => {
     saveHashesLocally(frameHashes);
   }
 
-  statusDiv.textContent = "Traitement terminé (vidéo + frames + hashes)";
+  statusDiv.textContent = "Upload terminé (vidéo + frames + hashes)";
 };
 
-/* =====================================================
-   Record bouton
-===================================================== */
+/* Record bouton */
 recordBtn.onclick = () => {
   if (mediaRecorder.state === "inactive") {
     chunks = [];
     frameHashes = [];
     framesBuffer = [];
-
     mediaRecorder.start();
     startFrameCapture();
-
     recordBtn.textContent = "Arrêter enregistrement";
     statusDiv.textContent = "Enregistrement en cours...";
   } else {
