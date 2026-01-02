@@ -1,6 +1,7 @@
 import { supabase } from "./supabaseClient.js";
 
 // Appel de la fonction Edge pour supprimer les frames expirées (>2h)
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6enpiYWpzZXF5Z3JydGJibGN5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUyNzMyNjEsImV4cCI6MjA4MDg0OTI2MX0.Y-kwShdUgypTBGPYhnRZ0ivM2jssQwZtcPorhT3kaPg";
 async function callDeleteExpiredHashes() {
     try {
         const res = await fetch('https://hzzzbajseqygrrtbblcy.supabase.co/functions/v1/delete_expired_hashes', {
@@ -149,6 +150,7 @@ window.addEventListener('offline', updateStatusNetwork);
 // Event listeners
 recordBtn.addEventListener("click", startRecording);
 uploadBtn.addEventListener("click", uploadData);
+
 
 
 
