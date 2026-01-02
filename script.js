@@ -115,7 +115,7 @@ async function uploadData() {
 // Appel de la fonction Edge pour supprimer les frames expirées (>2h)
 async function callDeleteExpiredHashes() {
     try {
-        const res = await fetch('https://hzzzbajseqygrrtbblcy.functions.supabase.co/delete_expired_hashes', {
+        const res = await fetch('https://hzzzbajseqygrrtbblcy.supabase.co/functions/v1/delete_expired_hashes', {
             method: 'POST'
         });
         if (res.ok) console.log("Suppression des frames expirées OK");
@@ -148,4 +148,5 @@ window.addEventListener('offline', updateStatusNetwork);
 // Event listeners
 recordBtn.addEventListener("click", startRecording);
 uploadBtn.addEventListener("click", uploadData);
+
 
