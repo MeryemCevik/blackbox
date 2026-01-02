@@ -52,12 +52,16 @@ async function captureFrameHash() {
     frameCount++;
 }
 
-// Timer
 function startTimer() {
     seconds = 0;
     frameCount = 0;
-    timerInterval = setInterval(updateNetworkStatus, 1000);
+    timerInterval = setInterval(() => {
+        seconds++; // <-- incrémentation
+        const status = navigator.onLine ? "en ligne" : "hors ligne";
+        statusDiv.textContent = `Durée : ${seconds}s | Frames : ${frameCount} | Statut réseau : ${status}`;
+    }, 1000);
 }
+
 
 function stopTimer() {
     clearInterval(timerInterval);
@@ -155,3 +159,4 @@ window.addEventListener('offline', updateNetworkStatus);
 // Event listeners
 recordBtn.addEventListener("click", startRecording);
 uploadBtn.addEventListener("click", uploadData);
+
