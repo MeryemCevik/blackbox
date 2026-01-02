@@ -5,132 +5,136 @@ const video = document.getElementById("preview");
 const recordBtn = document.getElementById("recordBtn");
 const uploadBtn = document.getElementById("uploadBtn");
 const statusDiv = document.getElementById("status");
+const frameCountEl = document.getElementById("frameCount");
+const recordTimeEl = document.getElementById("recordTime");
+const videoStatusEl = document.getElementById("videoStatus");
+const networkStatusEl = document.getElementById("networkStatus");
 
 // Variables
 let mediaRecorder;
 let recordedChunks = [];
 let frameHashes = [];
-let tempHashes = []; // pour stockage côté client en cas de coupure réseau
+let tempHashes = [];
 let captureInterval;
+let startTime;
+let timerInterval;
+let framesCaptured = 0;
 
-// Fonction utilitaire pour afficher le status
-function updateStatus(message) {
+// Status update utilitaire
+function updateStatus(message, type = "success") {
     statusDiv.textContent = message;
+    statusDiv.className = type === "success" ? "status-success" : type === "error" ? "status-error" : "status-warning";
 }
 
-// Fonction pour capturer les frames et calculer le hash
+// Timer pour durée enregistrement
+function startTimer() {
+    startTime = Date.now();
+    timerInterval = setInterval(() => {
+        const seconds = Math.floor((Date.now() - startTime) / 1000);
+        recordTimeEl.textContent = seconds;
+    }, 1000);
+}
+
+function stopTimer() {
+    clearInterval(timerInterval);
+}
+
+// Capture frame et hash
 async function captureFrameHash() {
     if (!video.videoWidth || !video.videoHeight) return;
-
-    // Créer un canvas pour capturer la frame
     const canvas = document.createElement("canvas");
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext("2d");
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    // Convertir en Blob et en ArrayBuffer pour le hash
     const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
     const buffer = await blob.arrayBuffer();
 
-    // Calcul du hash SHA-256
     const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
-    // Stocker le hash temporairement
     frameHashes.push({ created_at: new Date().toISOString(), hash: hashHex });
     tempHashes.push({ created_at: new Date().toISOString(), hash: hashHex });
 
+    framesCaptured++;
+    frameCountEl.textContent = framesCaptured;
     updateStatus(`Frame capturée et hashée : ${hashHex.slice(0, 16)}...`);
 }
 
-// Fonction pour démarrer l'enregistrement vidéo
+// Démarrer l'enregistrement
 async function startRecording() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         video.srcObject = stream;
 
         mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
-        mediaRecorder.ondataavailable = e => {
-            if (e.data.size > 0) recordedChunks.push(e.data);
-        };
-        mediaRecorder.start(100); // envoie des données toutes les 100ms
+        mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+        mediaRecorder.start(100);
 
-        // Capture de frames toutes les 500ms (ajustable)
         captureInterval = setInterval(captureFrameHash, 500);
+        startTimer();
 
         recordBtn.disabled = true;
         uploadBtn.disabled = false;
+        recordBtn.classList.add("recording");
         updateStatus("Enregistrement en cours...");
     } catch (err) {
         console.error("Erreur caméra:", err);
-        updateStatus("Impossible d'accéder à la caméra.");
+        updateStatus("Impossible d'accéder à la caméra.", "error");
     }
 }
 
-// Fonction pour envoyer les frames et hashs à Supabase
+// Upload vidéo + hashes
 async function uploadData() {
     clearInterval(captureInterval);
+    stopTimer();
     mediaRecorder.stop();
+    recordBtn.classList.remove("recording");
 
-    // 1. Convertir la vidéo en Blob
     const videoBlob = new Blob(recordedChunks, { type: 'video/webm' });
     const videoName = `video_${Date.now()}.webm`;
 
-    // 2. Upload de la vidéo dans Supabase Storage
-    const { data: videoData, error: videoError } = await supabase
-        .storage
-        .from('videos')
-        .upload(videoName, videoBlob);
-
+    const { error: videoError } = await supabase.storage.from('videos').upload(videoName, videoBlob);
     if (videoError) {
-        console.error("Erreur upload vidéo:", videoError);
-        updateStatus("Erreur lors de l'envoi de la vidéo. Hashes sauvegardés localement.");
+        console.error(videoError);
+        updateStatus("Erreur upload vidéo. Hashes sauvegardés localement.", "error");
         return;
     }
-
+    videoStatusEl.textContent = "oui";
     updateStatus("Vidéo uploadée avec succès ! Upload des hashes en cours...");
 
-    // 3. Upload des hashes dans la table frame_hashes
-    try {
-        const { error: hashError } = await supabase
-            .from('frame_hashes')
-            .insert(frameHashes);
-
-        if (hashError) {
-            console.error("Erreur insertion hashes:", hashError);
-            updateStatus("Erreur lors de l'envoi des hashes. Stockage côté client activé.");
-        } else {
-            updateStatus("Hashes uploadés avec succès !");
-            // vider le stockage temporaire
-            tempHashes = [];
-            frameHashes = [];
-            recordedChunks = [];
-            uploadBtn.disabled = true;
-            recordBtn.disabled = false;
-        }
-    } catch (err) {
-        console.error(err);
+    const { error: hashError } = await supabase.from('frame_hashes').insert(frameHashes);
+    if (hashError) {
+        console.error(hashError);
+        updateStatus("Erreur lors de l'envoi des hashes. Stockage côté client activé.", "error");
+    } else {
+        updateStatus("Hashes uploadés avec succès !");
+        tempHashes = [];
+        frameHashes = [];
+        recordedChunks = [];
+        uploadBtn.disabled = true;
+        recordBtn.disabled = false;
+        framesCaptured = 0;
+        frameCountEl.textContent = 0;
+        recordTimeEl.textContent = 0;
     }
 }
 
-// Gestion des reconnections réseau
+// Gestion reconnections
 window.addEventListener('online', async () => {
+    networkStatusEl.textContent = "en ligne";
     if (tempHashes.length > 0) {
-        updateStatus("Connexion réseau rétablie, envoi des hashes sauvegardés...");
-        try {
-            const { error } = await supabase.from('frame_hashes').insert(tempHashes);
-            if (!error) {
-                tempHashes = [];
-                updateStatus("Hashes temporaires uploadés avec succès !");
-            }
-        } catch (err) {
-            console.error("Erreur upload tempHashes:", err);
+        updateStatus("Connexion rétablie, envoi des hashes sauvegardés...");
+        const { error } = await supabase.from('frame_hashes').insert(tempHashes);
+        if (!error) {
+            tempHashes = [];
+            updateStatus("Hashes temporaires uploadés !");
         }
     }
 });
+window.addEventListener('offline', () => { networkStatusEl.textContent = "hors ligne"; });
 
-// Event listeners
 recordBtn.addEventListener("click", startRecording);
 uploadBtn.addEventListener("click", uploadData);
