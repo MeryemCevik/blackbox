@@ -12,20 +12,12 @@ let recordedChunks = [];
 let frameHashes = [];
 let tempHashes = []; // stockage côté client en cas de coupure réseau
 let captureInterval;
-let timerInterval;
-let seconds = 0;
 let frameCount = 0;
 
-// Statut réseau
-function updateNetworkStatus() {
+// Statut réseau + compteur de frames
+function updateStatusNetwork() {
     const status = navigator.onLine ? "en ligne" : "hors ligne";
-    statusDiv.textContent = `Durée : ${seconds}s | Frames : ${frameCount} | Statut réseau : ${status}`;
-}
-
-// Fonction utilitaire pour afficher le status
-function updateStatus(message, type = "") {
-    statusDiv.textContent = message;
-    statusDiv.className = type; // '' / 'status-success' / 'status-error' / 'status-warning'
+    statusDiv.textContent = `Frames : ${frameCount} | Statut réseau : ${status}`;
 }
 
 // Fonction pour capturer les frames et calculer le hash
@@ -50,21 +42,7 @@ async function captureFrameHash() {
     tempHashes.push({ created_at: new Date().toISOString(), hash: hashHex });
 
     frameCount++;
-}
-
-function startTimer() {
-    seconds = 0;
-    frameCount = 0;
-    timerInterval = setInterval(() => {
-        seconds++; // <-- incrémentation
-        const status = navigator.onLine ? "en ligne" : "hors ligne";
-        statusDiv.textContent = `Durée : ${seconds}s | Frames : ${frameCount} | Statut réseau : ${status}`;
-    }, 1000);
-}
-
-
-function stopTimer() {
-    clearInterval(timerInterval);
+    updateStatusNetwork(); // mise à jour du compteur à chaque frame
 }
 
 // Démarrer l'enregistrement
@@ -82,24 +60,20 @@ async function startRecording() {
         captureInterval = setInterval(captureFrameHash, 500);
 
         recordBtn.disabled = true;
-        recordBtn.classList.add("recording");
         uploadBtn.disabled = false;
-
-        startTimer();
     } catch (err) {
         console.error("Erreur caméra:", err);
-        updateStatus("Impossible d'accéder à la caméra.", "status-error");
+        statusDiv.textContent = "Impossible d'accéder à la caméra.";
     }
 }
 
 // Upload
 async function uploadData() {
     clearInterval(captureInterval);
-    stopTimer();
-    recordBtn.disabled = false;
-    recordBtn.classList.remove("recording");
 
     mediaRecorder.stop();
+    recordBtn.disabled = false;
+    uploadBtn.disabled = true;
 
     const videoBlob = new Blob(recordedChunks, { type: 'video/webm' });
     const videoName = `video_${Date.now()}.webm`;
@@ -111,26 +85,24 @@ async function uploadData() {
 
     if (videoError) {
         console.error("Erreur upload vidéo:", videoError);
-        updateStatus("Erreur lors de l'envoi de la vidéo. Hashes sauvegardés localement.", "status-error");
+        statusDiv.textContent = "Erreur lors de l'envoi de la vidéo. Hashes sauvegardés localement.";
         return;
     }
 
-    updateStatus("Vidéo uploadée avec succès !", "status-success");
+    statusDiv.textContent = "Vidéo uploadée avec succès !";
 
     try {
         const { error: hashError } = await supabase.from('frame_hashes').insert(frameHashes);
 
         if (hashError) {
             console.error("Erreur insertion hashes:", hashError);
-            updateStatus("Erreur lors de l'envoi des hashes. Stockage côté client activé.", "status-warning");
+            statusDiv.textContent = "Erreur lors de l'envoi des hashes. Stockage côté client activé.";
         } else {
-            updateStatus("Hashes uploadés avec succès !", "status-success");
+            statusDiv.textContent = "Hashes uploadés avec succès !";
             tempHashes = [];
             frameHashes = [];
             recordedChunks = [];
-            uploadBtn.disabled = true;
             frameCount = 0;
-            seconds = 0;
         }
     } catch (err) {
         console.error(err);
@@ -139,14 +111,14 @@ async function uploadData() {
 
 // Gestion réseau
 window.addEventListener('online', async () => {
-    updateNetworkStatus();
+    updateStatusNetwork();
     if (tempHashes.length > 0) {
-        updateStatus("Connexion réseau rétablie, envoi des hashes sauvegardés...", "status-success");
+        statusDiv.textContent = "Connexion réseau rétablie, envoi des hashes sauvegardés...";
         try {
             const { error } = await supabase.from('frame_hashes').insert(tempHashes);
             if (!error) {
                 tempHashes = [];
-                updateStatus("Hashes temporaires uploadés avec succès !", "status-success");
+                statusDiv.textContent = "Hashes temporaires uploadés avec succès !";
             }
         } catch (err) {
             console.error("Erreur upload tempHashes:", err);
@@ -154,9 +126,8 @@ window.addEventListener('online', async () => {
     }
 });
 
-window.addEventListener('offline', updateNetworkStatus);
+window.addEventListener('offline', updateStatusNetwork);
 
 // Event listeners
 recordBtn.addEventListener("click", startRecording);
 uploadBtn.addEventListener("click", uploadData);
-
