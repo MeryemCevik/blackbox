@@ -10,7 +10,7 @@ const statusDiv = document.getElementById("status");
 let mediaRecorder;
 let recordedChunks = [];
 let frameHashes = [];
-let tempHashes = []; // pour stockage côté client en cas de coupure réseau
+let tempHashes = []; // stockage côté client en cas de coupure réseau
 let captureInterval;
 let timerInterval;
 let seconds = 0;
@@ -19,7 +19,7 @@ let frameCount = 0;
 // Statut réseau
 function updateNetworkStatus() {
     const status = navigator.onLine ? "en ligne" : "hors ligne";
-    statusDiv.textContent = `Statut réseau : ${status}`;
+    statusDiv.textContent = `Durée : ${seconds}s | Frames : ${frameCount} | Statut réseau : ${status}`;
 }
 
 // Fonction utilitaire pour afficher le status
@@ -32,44 +32,38 @@ function updateStatus(message, type = "") {
 async function captureFrameHash() {
     if (!video.videoWidth || !video.videoHeight) return;
 
-    // Créer un canvas pour capturer la frame
     const canvas = document.createElement("canvas");
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext("2d");
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    // Convertir en Blob et en ArrayBuffer pour le hash
     const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
     const buffer = await blob.arrayBuffer();
 
-    // Calcul du hash SHA-256
     const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
-    // Stocker le hash temporairement
+    // Stockage des hashes
     frameHashes.push({ created_at: new Date().toISOString(), hash: hashHex });
     tempHashes.push({ created_at: new Date().toISOString(), hash: hashHex });
 
     frameCount++;
-    updateStatus(`Frame capturée (${frameCount}) et hashée : ${hashHex.slice(0, 16)}...`);
 }
 
-// Fonction timer
+// Timer
 function startTimer() {
     seconds = 0;
-    timerInterval = setInterval(() => {
-        seconds++;
-        statusDiv.textContent = `Durée enregistrement : ${seconds}s | Frames : ${frameCount} | Statut réseau : ${navigator.onLine ? "en ligne" : "hors ligne"}`;
-    }, 1000);
+    frameCount = 0;
+    timerInterval = setInterval(updateNetworkStatus, 1000);
 }
 
 function stopTimer() {
     clearInterval(timerInterval);
 }
 
-// Fonction pour démarrer l'enregistrement vidéo
+// Démarrer l'enregistrement
 async function startRecording() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
@@ -79,16 +73,14 @@ async function startRecording() {
         mediaRecorder.ondataavailable = e => {
             if (e.data.size > 0) recordedChunks.push(e.data);
         };
-        mediaRecorder.start(100); // envoie des données toutes les 100ms
+        mediaRecorder.start(100);
 
-        // Capture de frames toutes les 500ms
         captureInterval = setInterval(captureFrameHash, 500);
 
         recordBtn.disabled = true;
         recordBtn.classList.add("recording");
         uploadBtn.disabled = false;
 
-        frameCount = 0;
         startTimer();
     } catch (err) {
         console.error("Erreur caméra:", err);
@@ -96,7 +88,7 @@ async function startRecording() {
     }
 }
 
-// Fonction pour envoyer les frames et hashs à Supabase
+// Upload
 async function uploadData() {
     clearInterval(captureInterval);
     stopTimer();
@@ -108,7 +100,6 @@ async function uploadData() {
     const videoBlob = new Blob(recordedChunks, { type: 'video/webm' });
     const videoName = `video_${Date.now()}.webm`;
 
-    // Upload vidéo
     const { data: videoData, error: videoError } = await supabase
         .storage
         .from('videos')
@@ -122,7 +113,6 @@ async function uploadData() {
 
     updateStatus("Vidéo uploadée avec succès !", "status-success");
 
-    // Upload hashes
     try {
         const { error: hashError } = await supabase.from('frame_hashes').insert(frameHashes);
 
@@ -143,7 +133,7 @@ async function uploadData() {
     }
 }
 
-// Gestion des reconnections réseau
+// Gestion réseau
 window.addEventListener('online', async () => {
     updateNetworkStatus();
     if (tempHashes.length > 0) {
