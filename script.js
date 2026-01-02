@@ -1,5 +1,18 @@
 import { supabase } from "./supabaseClient.js";
 
+// Appel de la fonction Edge pour supprimer les frames expirées (>2h)
+async function callDeleteExpiredHashes() {
+    try {
+        const res = await fetch('https://hzzzbajseqygrrtbblcy.supabase.co/functions/v1/delete_expired_hashes', {
+            method: 'POST'
+        });
+        if (res.ok) console.log("Suppression des frames expirées OK");
+        else console.warn("Erreur suppression frames expirées", res.statusText);
+    } catch (err) {
+        console.error("Erreur suppression frames expirées :", err);
+    }
+}
+
 // DOM Elements
 const video = document.getElementById("preview");
 const recordBtn = document.getElementById("recordBtn");
@@ -112,18 +125,6 @@ async function uploadData() {
     }
 }
 
-// Appel de la fonction Edge pour supprimer les frames expirées (>2h)
-async function callDeleteExpiredHashes() {
-    try {
-        const res = await fetch('https://hzzzbajseqygrrtbblcy.supabase.co/functions/v1/delete_expired_hashes', {
-            method: 'POST'
-        });
-        if (res.ok) console.log("Suppression des frames expirées OK");
-        else console.warn("Erreur suppression frames expirées", res.statusText);
-    } catch (err) {
-        console.error("Erreur suppression frames expirées :", err);
-    }
-}
 
 
 // Gestion réseau
@@ -148,5 +149,6 @@ window.addEventListener('offline', updateStatusNetwork);
 // Event listeners
 recordBtn.addEventListener("click", startRecording);
 uploadBtn.addEventListener("click", uploadData);
+
 
 
