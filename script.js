@@ -88,16 +88,11 @@ async function sha256(blob) {
    Capture et hash frames
 ===================================================== */
 async function captureAndHashFrame() {
-  // Dessiner la vidéo sur le canvas
   ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-
-  // Convertir en blob
   const blob = await new Promise(res => canvas.toBlob(res, "image/jpeg", 0.7));
+  if (!blob || blob.size === 0) return; // éviter les blobs vides
 
-  // Hash
   const hash = await sha256(blob);
-
-  // Ajouter aux buffers
   framesBuffer.push(blob);
   frameHashes.push({
     hash,
@@ -124,7 +119,7 @@ uploadBtn.onclick = async () => {
 
   // 1️⃣ Upload vidéo brute
   const videoName = `video_${timestamp}.mp4`;
-  const { error: videoError } = await supabase.storage.from("videos").upload(videoName, videoBlob);
+  const { error: videoError } = await supabase.storage.from("videos").upload(videoName, videoBlob, { upsert: true });
   if (videoError) {
     statusDiv.textContent = "Erreur upload vidéo : " + videoError.message;
     return;
@@ -133,7 +128,9 @@ uploadBtn.onclick = async () => {
   // 2️⃣ Upload frames
   for (let i = 0; i < framesBuffer.length; i++) {
     const frameName = `frames/frame_${timestamp}_${i}.jpg`;
-    const { error: frameError } = await supabase.storage.from("videos").upload(frameName, framesBuffer[i]);
+    const { error: frameError } = await supabase.storage
+      .from("videos")
+      .upload(frameName, framesBuffer[i], { upsert: true });
     if (frameError) console.error("Erreur upload frame:", frameError);
   }
 
