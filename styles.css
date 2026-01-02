@@ -1,21 +1,78 @@
 body {
-    font-family: Arial, sans-serif;
-    padding: 20px;
-    text-align: center;
-  }
-  
-  #preview {
-    width: 90%;
-    max-width: 400px;
-    background: #000;
-    border-radius: 8px;
-    margin-bottom: 20px;
-  }
-  
-  button {
-    padding: 12px 20px;
-    margin: 10px;
-    font-size: 16px;
-    cursor: pointer;
-  }
-  
+  font-family: Arial, sans-serif;
+  padding: 20px;
+  text-align: center;
+  background: #f5f5f5;
+}
+
+h1 {
+  color: #333;
+}
+
+#preview {
+  width: 90%;
+  max-width: 400px;
+  background: #000;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  border: 2px solid #444;
+}
+
+button {
+  padding: 12px 20px;
+  margin: 10px;
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: 5px;
+  border: none;
+  transition: background 0.3s;
+}
+
+#recordBtn {
+  background-color: #28a745;
+  color: #fff;
+}
+
+#recordBtn.recording {
+  background-color: #dc3545;
+  animation: pulse 1s infinite;
+}
+
+#uploadBtn {
+  background-color: #007bff;
+  color: #fff;
+}
+
+button:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.7); }
+  70% { box-shadow: 0 0 0 10px rgba(220, 53, 69, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0); }
+}
+
+#status {
+  margin-top: 15px;
+  font-weight: bold;
+}
+
+.infoBox {
+  background: #fff;
+  border-radius: 8px;
+  padding: 10px 15px;
+  margin-top: 20px;
+  display: inline-block;
+  text-align: left;
+  border: 1px solid #ccc;
+}
+
+.infoBox p {
+  margin: 5px 0;
+}
+
+.status-success { color: green; }
+.status-error { color: red; }
+.status-warning { color: orange; }
