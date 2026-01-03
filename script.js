@@ -2,7 +2,6 @@ import { supabase } from "./supabaseClient.js";
 
 const video = document.getElementById("preview");
 const recordBtn = document.getElementById("recordBtn");
-const stopBtn = document.getElementById("stopBtn");
 const uploadBtn = document.getElementById("uploadBtn");
 const statusDiv = document.getElementById("status");
 
@@ -59,6 +58,7 @@ async function extractFramesFromVideo(videoBlob, intervalMs = 500) {
     });
 }
 
+// Démarrer l’enregistrement
 recordBtn.onclick = async () => {
     const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
     video.srcObject = stream;
@@ -76,11 +76,12 @@ recordBtn.onclick = async () => {
 
     statusDiv.textContent = `Enregistrement… video_id = ${currentVideoId}`;
     recordBtn.disabled = true;
-    stopBtn.disabled = false;
-};
 
-stopBtn.onclick = () => {
-    mediaRecorder.stop();
+    // Arrêt automatique après 5 secondes (modifiable)
+    setTimeout(() => {
+        mediaRecorder.stop();
+    }, 5000);
+
     mediaRecorder.onstop = () => {
         const stream = video.srcObject;
         if (stream) {
@@ -90,11 +91,11 @@ stopBtn.onclick = () => {
 
         recordedBlob = new Blob(chunks, { type: "video/webm" });
         statusDiv.textContent = `Vidéo prête. video_id = ${currentVideoId}`;
-        stopBtn.disabled = true;
         uploadBtn.disabled = false;
     };
 };
 
+// Upload vidéo + hashes
 uploadBtn.onclick = async () => {
     if (!recordedBlob) return;
 
