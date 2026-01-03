@@ -1,33 +1,44 @@
 import { supabase } from "./supabaseClient.js";
 
-// Extraction des frames depuis la vidéo enregistrée
+const video = document.getElementById("preview");
+const recordBtn = document.getElementById("recordBtn");
+const stopBtn = document.getElementById("stopBtn");
+const uploadBtn = document.getElementById("uploadBtn");
+const statusDiv = document.getElementById("status");
+
+let mediaRecorder;
+let chunks = [];
+let recordedBlob = null;
+let currentVideoId = null;
+
+// Extraction de frames depuis la vidéo enregistrée
 async function extractFramesFromVideo(videoBlob, intervalMs = 500) {
     return new Promise((resolve) => {
-        const video = document.createElement("video");
-        video.src = URL.createObjectURL(videoBlob);
-        video.muted = true;
-        video.preload = "metadata";
+        const videoEl = document.createElement("video");
+        videoEl.src = URL.createObjectURL(videoBlob);
+        videoEl.muted = true;
+        videoEl.preload = "metadata";
 
         const canvas = document.createElement("canvas");
         const ctx = canvas.getContext("2d");
 
-        const frames = [];
+        const hashes = [];
         let currentTime = 0;
 
-        video.onloadedmetadata = () => {
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
+        videoEl.onloadedmetadata = () => {
+            canvas.width = videoEl.videoWidth;
+            canvas.height = videoEl.videoHeight;
 
             function seek() {
-                if (currentTime > video.duration) {
-                    resolve(frames);
+                if (currentTime > videoEl.duration) {
+                    resolve(hashes);
                     return;
                 }
-                video.currentTime = currentTime;
+                videoEl.currentTime = currentTime;
             }
 
-            video.onseeked = async () => {
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            videoEl.onseeked = async () => {
+                ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
 
                 const blob = await new Promise(res => canvas.toBlob(res, "image/png"));
                 const buffer = await blob.arrayBuffer();
@@ -37,7 +48,7 @@ async function extractFramesFromVideo(videoBlob, intervalMs = 500) {
                     .map(b => b.toString(16).padStart(2, "0"))
                     .join("");
 
-                frames.push(hashHex);
+                hashes.push(hashHex);
 
                 currentTime += intervalMs / 1000;
                 seek();
@@ -48,45 +59,88 @@ async function extractFramesFromVideo(videoBlob, intervalMs = 500) {
     });
 }
 
-// Enregistrement vidéo
-const video = document.getElementById("preview");
-const recordBtn = document.getElementById("recordBtn");
-const uploadBtn = document.getElementById("uploadBtn");
-
-let mediaRecorder;
-let chunks = [];
-
 recordBtn.onclick = async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
     video.srcObject = stream;
 
+    chunks = [];
+    recordedBlob = null;
+    currentVideoId = Date.now().toString(); // identifiant unique
+
     mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm" });
-    mediaRecorder.ondataavailable = e => chunks.push(e.data);
+    mediaRecorder.ondataavailable = e => {
+        if (e.data.size > 0) chunks.push(e.data);
+    };
+
     mediaRecorder.start();
 
+    statusDiv.textContent = `Enregistrement en cours… video_id = ${currentVideoId}`;
     recordBtn.disabled = true;
-    uploadBtn.disabled = false;
+    stopBtn.disabled = false;
+    uploadBtn.disabled = true;
+};
+
+stopBtn.onclick = () => {
+    mediaRecorder.stop();
+    mediaRecorder.onstop = () => {
+        const stream = video.srcObject;
+        if (stream) {
+            stream.getTracks().forEach(t => t.stop());
+            video.srcObject = null;
+        }
+
+        recordedBlob = new Blob(chunks, { type: "video/webm" });
+        statusDiv.textContent = `Enregistrement terminé. video_id = ${currentVideoId}`;
+        stopBtn.disabled = true;
+        uploadBtn.disabled = false;
+    };
 };
 
 uploadBtn.onclick = async () => {
-    mediaRecorder.stop();
+    if (!recordedBlob || !currentVideoId) {
+        alert("Aucune vidéo enregistrée.");
+        return;
+    }
 
-    mediaRecorder.onstop = async () => {
-        const blob = new Blob(chunks, { type: "video/webm" });
-        const name = `video_${Date.now()}.webm`;
+    statusDiv.textContent = "Upload vidéo en cours…";
 
-        // Upload vidéo
-        await supabase.storage.from("videos").upload(name, blob);
+    const videoName = `video_${currentVideoId}.webm`;
 
-        // Extraction + hash
-        const hashes = await extractFramesFromVideo(blob);
+    // 1) Upload vidéo
+    const { error: uploadError } = await supabase
+        .storage
+        .from("videos")
+        .upload(videoName, recordedBlob);
 
-        // Upload hashes
-        await supabase.from("frame_hashes").insert(
-            hashes.map(h => ({ hash: h }))
-        );
+    if (uploadError) {
+        console.error(uploadError);
+        statusDiv.textContent = "Erreur upload vidéo.";
+        return;
+    }
 
-        alert("Vidéo + hashes envoyés !");
-        chunks = [];
-    };
+    statusDiv.textContent = "Extraction des frames et génération des hashes…";
+
+    // 2) Extraction des frames + hashes
+    const hashes = await extractFramesFromVideo(recordedBlob, 500);
+
+    // 3) Insertion des hashes avec video_id
+    const rows = hashes.map((h, index) => ({
+        video_id: currentVideoId,
+        frame_index: index,
+        hash: h
+    }));
+
+    const { error: hashError } = await supabase
+        .from("frame_hashes")
+        .insert(rows);
+
+    if (hashError) {
+        console.error(hashError);
+        statusDiv.textContent = "Erreur insertion hashes.";
+        return;
+    }
+
+    statusDiv.textContent = `Upload terminé. video_id = ${currentVideoId}, hashes = ${hashes.length}`;
+    uploadBtn.disabled = true;
+    recordBtn.disabled = false;
 };
