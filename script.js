@@ -4,16 +4,18 @@ import { supabase } from "./supabaseClient.js";
    NETTOYAGE DONNÉES EXPIRÉES
    ========================= */
 async function cleanExpiredData() {
-    console.log("[ENCODEUR] Nettoyage données expirées");
+    console.log("[ENCODEUR] Nettoyage données expirées…");
 
     const limitDate = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
 
-    await supabase
+    const { error: hashError } = await supabase
         .from("frame_hashes")
         .delete()
         .lt("created_at", limitDate);
+    if (hashError) console.error("[ENCODEUR] Erreur suppression hashes :", hashError);
 
-    const { data: files } = await supabase.storage.from("videos").list();
+    const { data: files, error: listError } = await supabase.storage.from("videos").list();
+    if (listError) return console.error("[ENCODEUR] Erreur liste vidéos :", listError);
 
     const expired = files.filter(f => {
         const m = f.name.match(/video_(\d+)\.webm/);
@@ -21,9 +23,7 @@ async function cleanExpiredData() {
     });
 
     if (expired.length) {
-        await supabase.storage
-            .from("videos")
-            .remove(expired.map(f => f.name));
+        await supabase.storage.from("videos").remove(expired.map(f => f.name));
         console.log(`[ENCODEUR] ${expired.length} vidéos supprimées`);
     }
 }
@@ -42,13 +42,26 @@ const statusDiv = document.getElementById("status");
 let mediaRecorder;
 let recordedChunks = [];
 let frameHashes = [];
-let captureInterval;
 let frameCount = 0;
 
 cleanExpiredData();
 
 /* =========================
-   HASH FRAME
+   HASH CANVAS
+   ========================= */
+async function hashCanvas(canvas) {
+    const ctx = canvas.getContext("2d");
+    // récupère les pixels (RGBA)
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const buffer = imageData.data.buffer;
+    const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+    return Array.from(new Uint8Array(hashBuffer))
+        .map(b => b.toString(16).padStart(2, "0"))
+        .join("");
+}
+
+/* =========================
+   CAPTURE FRAME
    ========================= */
 async function captureFrameHash() {
     if (!video.videoWidth || !video.videoHeight) return;
@@ -62,14 +75,13 @@ async function captureFrameHash() {
 
     const hash = await hashCanvas(canvas);
 
-    console.log(`[ENCODEUR] Frame ${frameCount} → ${hash.slice(0, 16)}…`);
-
     frameHashes.push({
         created_at: new Date().toISOString(),
         hash
     });
 
     frameCount++;
+    console.log(`[ENCODEUR] Frame ${frameCount} → ${hash.slice(0, 16)}…`);
     statusDiv.textContent = `Frames : ${frameCount}`;
 }
 
@@ -103,7 +115,7 @@ async function uploadData() {
     await supabase.storage.from("videos").upload(videoName, videoBlob);
     await supabase.from("frame_hashes").insert(frameHashes);
 
-    console.log("[ENCODEUR] Upload terminé");
+    console.log("[ENCODEUR] Upload terminé !");
     frameHashes = [];
     recordedChunks = [];
     frameCount = 0;
