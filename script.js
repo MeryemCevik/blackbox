@@ -1,123 +1,144 @@
 import { supabase } from "./supabaseClient.js";
 
+/* =========================
+   NETTOYAGE DES DONNÉES
+   ========================= */
+async function cleanExpiredData() {
+    const limitDate = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+
+    await supabase.from("frame_hashes").delete().lt("created_at", limitDate);
+
+    const { data: files } = await supabase.storage.from("videos").list();
+    const expired = files.filter(f => {
+        const m = f.name.match(/video_(\d+)\.webm/);
+        return m && Number(m[1]) < Date.now() - 2 * 60 * 60 * 1000;
+    });
+
+    if (expired.length) {
+        await supabase.storage.from("videos").remove(expired.map(f => f.name));
+    }
+}
+
+cleanExpiredData();
+
+/* =========================
+   DOM
+   ========================= */
 const video = document.getElementById("preview");
 const recordBtn = document.getElementById("recordBtn");
 const uploadBtn = document.getElementById("uploadBtn");
 const statusDiv = document.getElementById("status");
 
+/* =========================
+   VARIABLES
+   ========================= */
 let mediaRecorder;
-let chunks = [];
-let recordedBlob = null;
-let currentVideoId = null;
+let recordedChunks = [];
+let frameHashes = [];
+let tempHashes = [];
+let frameCount = 0;
 
-// Extraction des frames depuis la vidéo enregistrée
-async function extractFramesFromVideo(videoBlob, intervalMs = 500) {
-    return new Promise((resolve) => {
-        const videoEl = document.createElement("video");
-        videoEl.src = URL.createObjectURL(videoBlob);
-        videoEl.muted = true;
-        videoEl.preload = "metadata";
-
-        const canvas = document.createElement("canvas");
-        const ctx = canvas.getContext("2d");
-
-        const hashes = [];
-        let currentTime = 0;
-
-        videoEl.onloadedmetadata = () => {
-            canvas.width = videoEl.videoWidth;
-            canvas.height = videoEl.videoHeight;
-
-            function seek() {
-                if (currentTime > videoEl.duration) {
-                    resolve(hashes);
-                    return;
-                }
-                videoEl.currentTime = currentTime;
-            }
-
-            videoEl.onseeked = async () => {
-                ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-
-                const blob = await new Promise(res => canvas.toBlob(res, "image/png"));
-                const buffer = await blob.arrayBuffer();
-
-                const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
-                const hashHex = Array.from(new Uint8Array(hashBuffer))
-                    .map(b => b.toString(16).padStart(2, "0"))
-                    .join("");
-
-                hashes.push(hashHex);
-
-                currentTime += intervalMs / 1000;
-                seek();
-            };
-
-            seek();
-        };
-    });
-}
-
-// Démarrer l’enregistrement
-recordBtn.onclick = async () => {
+/* =========================
+   ENREGISTREMENT VIDÉO
+   ========================= */
+async function startRecording() {
     const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
     video.srcObject = stream;
 
-    chunks = [];
-    recordedBlob = null;
-    currentVideoId = Date.now().toString();
+    recordedChunks = [];
 
     mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm" });
-    mediaRecorder.ondataavailable = e => {
-        if (e.data.size > 0) chunks.push(e.data);
-    };
-
+    mediaRecorder.ondataavailable = e => e.data.size && recordedChunks.push(e.data);
     mediaRecorder.start();
 
-    statusDiv.textContent = `Enregistrement… video_id = ${currentVideoId}`;
     recordBtn.disabled = true;
+    uploadBtn.disabled = false;
+}
 
-    // Arrêt automatique après 5 secondes (modifiable)
-    setTimeout(() => {
-        mediaRecorder.stop();
-    }, 5000);
+/* =========================
+   EXTRACTION DES FRAMES DU WEBM
+   ========================= */
+async function extractAndHashFrames(videoBlob) {
+    const url = URL.createObjectURL(videoBlob);
+    const v = document.createElement("video");
+    v.src = url;
+    v.muted = true;
 
-    mediaRecorder.onstop = () => {
-        const stream = video.srcObject;
-        if (stream) {
-            stream.getTracks().forEach(t => t.stop());
-            video.srcObject = null;
-        }
+    await v.play();
+    await new Promise(r => v.onloadedmetadata = r);
 
-        recordedBlob = new Blob(chunks, { type: "video/webm" });
-        statusDiv.textContent = `Vidéo prête. video_id = ${currentVideoId}`;
-        uploadBtn.disabled = false;
-    };
-};
+    const canvas = document.createElement("canvas");
+    canvas.width = v.videoWidth;
+    canvas.height = v.videoHeight;
+    const ctx = canvas.getContext("2d");
 
-// Upload vidéo + hashes
-uploadBtn.onclick = async () => {
-    if (!recordedBlob) return;
+    const fps = 2; // 1 frame toutes les 500ms
+    const step = 1 / fps;
 
-    statusDiv.textContent = "Upload vidéo…";
+    for (let t = 0; t < v.duration; t += step) {
+        v.currentTime = t;
+        await new Promise(r => v.onseeked = r);
 
-    const videoName = `video_${currentVideoId}.webm`;
+        ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+        const blob = await new Promise(r => canvas.toBlob(r, "image/png"));
+        const buffer = await blob.arrayBuffer();
 
-    await supabase.storage.from("videos").upload(videoName, recordedBlob);
+        const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+        const hash = Array.from(new Uint8Array(hashBuffer))
+            .map(b => b.toString(16).padStart(2, "0"))
+            .join("");
 
-    statusDiv.textContent = "Extraction des frames…";
+        frameHashes.push({
+            hash,
+            timestamp: Number(t.toFixed(2)),
+            created_at: new Date().toISOString()
+        });
 
-    const hashes = await extractFramesFromVideo(recordedBlob, 500);
+        frameCount++;
+        statusDiv.textContent = `Frames hashées : ${frameCount}`;
+    }
 
-    const rows = hashes.map((h, i) => ({
-        video_id: currentVideoId,
-        frame_index: i,
-        hash: h
-    }));
+    URL.revokeObjectURL(url);
+}
 
-    await supabase.from("frame_hashes").insert(rows);
-
-    statusDiv.textContent = `Terminé. video_id = ${currentVideoId}, frames = ${hashes.length}`;
-    uploadBtn.disabled = true;
+/* =========================
+   UPLOAD VIDÉO + HASHES
+   ========================= */
+async function uploadData() {
+    mediaRecorder.stop();
     recordBtn.disabled = false;
-};
+    uploadBtn.disabled = true;
+
+    const videoBlob = new Blob(recordedChunks, { type: "video/webm" });
+    const videoName = `video_${Date.now()}.webm`;
+
+    await extractAndHashFrames(videoBlob);
+
+    await supabase.storage.from("videos").upload(videoName, videoBlob);
+    const { error } = await supabase.from("frame_hashes").insert(frameHashes);
+
+    if (error) {
+        tempHashes.push(...frameHashes);
+        statusDiv.textContent = "Erreur réseau, hashes stockés localement";
+    } else {
+        statusDiv.textContent = "Vidéo + hashes envoyés avec succès";
+        frameHashes = [];
+        frameCount = 0;
+    }
+}
+
+/* =========================
+   RÉSEAU
+   ========================= */
+window.addEventListener("online", async () => {
+    if (tempHashes.length) {
+        await supabase.from("frame_hashes").insert(tempHashes);
+        tempHashes = [];
+    }
+});
+
+/* =========================
+   EVENTS
+   ========================= */
+recordBtn.addEventListener("click", startRecording);
+uploadBtn.addEventListener("click", uploadData);
