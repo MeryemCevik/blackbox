@@ -1,43 +1,73 @@
 import { supabase } from "./supabaseClient.js";
 
-const SUPABASE_ANON_KEY =
-"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6enpiYWpzZXF5Z3JydGJibGN5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUyNzMyNjEsImV4cCI6MjA4MDg0OTI2MX0.Y-kwShdUgypTBGPYhnRZ0ivM2jssQwZtcPorhT3kaPg";
+// Nettoyage des données expirées (> 2 heures)
+async function cleanExpiredData() {
+    console.log("Nettoyage des données expirées…");
 
-async function callDeleteExpiredHashes() {
-    try {
-        console.log("Appel Edge Function : delete_expired_hashes");
+    const limitDate = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
 
-        const res = await fetch(
-            "https://hzzzbajseqygrrtbblcy.functions.supabase.co/delete_expired_hashes",
-            {
-                method: "POST",
-                headers: {
-                    "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
-                    "Content-Type": "application/json"
-                }
-            }
-        );
+    /* =========================
+       1) SUPPRESSION DES HASHES
+       ========================= */
+    const { error: hashError } = await supabase
+        .from("frame_hashes")
+        .delete()
+        .lt("created_at", limitDate);
 
-        if (!res.ok) {
-            const text = await res.text();
-            console.error("Erreur Edge Function :", res.status, text);
-            return;
-        }
+    if (hashError) {
+        console.error("Erreur suppression hashes :", hashError);
+    } else {
+        console.log("Hashes expirés supprimés");
+    }
 
-        const data = await res.json();
-        console.log("Suppression réussie :", data);
+    /* =========================
+       2) SUPPRESSION DES VIDÉOS
+       ========================= */
+    const { data: files, error: listError } = await supabase
+        .storage
+        .from("videos")
+        .list();
 
-    } catch (err) {
-        console.error("Erreur suppression frames expirées :", err);
+    if (listError) {
+        console.error("Erreur liste vidéos :", listError);
+        return;
+    }
+
+    const expiredVideos = files.filter(file => {
+        // video_1699999999999.webm
+        const match = file.name.match(/video_(\d+)\.webm/);
+        if (!match) return false;
+
+        const timestamp = Number(match[1]);
+        return timestamp < Date.now() - 2 * 60 * 60 * 1000;
+    });
+
+    if (expiredVideos.length === 0) {
+        console.log("Aucune vidéo expirée");
+        return;
+    }
+
+    const paths = expiredVideos.map(v => v.name);
+
+    const { error: deleteError } = await supabase
+        .storage
+        .from("videos")
+        .remove(paths);
+
+    if (deleteError) {
+        console.error("Erreur suppression vidéos :", deleteError);
+    } else {
+        console.log(`Vidéos supprimées : ${paths.length}`);
     }
 }
-
 
 // DOM Elements
 const video = document.getElementById("preview");
 const recordBtn = document.getElementById("recordBtn");
 const uploadBtn = document.getElementById("uploadBtn");
 const statusDiv = document.getElementById("status");
+// Nettoyage automatique au démarrage
+cleanExpiredData();
 
 // Variables
 let mediaRecorder;
@@ -169,6 +199,7 @@ window.addEventListener('offline', updateStatusNetwork);
 // Event listeners
 recordBtn.addEventListener("click", startRecording);
 uploadBtn.addEventListener("click", uploadData);
+
 
 
 
