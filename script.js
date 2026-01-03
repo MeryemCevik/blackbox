@@ -66,8 +66,6 @@ const video = document.getElementById("preview");
 const recordBtn = document.getElementById("recordBtn");
 const uploadBtn = document.getElementById("uploadBtn");
 const statusDiv = document.getElementById("status");
-// Nettoyage automatique au démarrage
-cleanExpiredData();
 
 // Variables
 let mediaRecorder;
@@ -77,8 +75,8 @@ let tempHashes = []; // stockage côté client en cas de coupure réseau
 let captureInterval;
 let frameCount = 0;
 
-// Supprimer les frames expirées dès le lancement
-callDeleteExpiredHashes();
+// Nettoyage automatique au démarrage
+cleanExpiredData();
 
 // Statut réseau + compteur de frames
 function updateStatusNetwork() {
@@ -199,6 +197,7 @@ window.addEventListener('offline', updateStatusNetwork);
 // Event listeners
 recordBtn.addEventListener("click", startRecording);
 uploadBtn.addEventListener("click", uploadData);
+
 
 
 
