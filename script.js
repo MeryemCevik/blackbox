@@ -11,7 +11,7 @@ let chunks = [];
 let recordedBlob = null;
 let currentVideoId = null;
 
-// Extraction de frames depuis la vidéo enregistrée
+// Extraction des frames depuis la vidéo enregistrée
 async function extractFramesFromVideo(videoBlob, intervalMs = 500) {
     return new Promise((resolve) => {
         const videoEl = document.createElement("video");
@@ -65,7 +65,7 @@ recordBtn.onclick = async () => {
 
     chunks = [];
     recordedBlob = null;
-    currentVideoId = Date.now().toString(); // identifiant unique
+    currentVideoId = Date.now().toString();
 
     mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm" });
     mediaRecorder.ondataavailable = e => {
@@ -74,10 +74,9 @@ recordBtn.onclick = async () => {
 
     mediaRecorder.start();
 
-    statusDiv.textContent = `Enregistrement en cours… video_id = ${currentVideoId}`;
+    statusDiv.textContent = `Enregistrement… video_id = ${currentVideoId}`;
     recordBtn.disabled = true;
     stopBtn.disabled = false;
-    uploadBtn.disabled = true;
 };
 
 stopBtn.onclick = () => {
@@ -90,57 +89,34 @@ stopBtn.onclick = () => {
         }
 
         recordedBlob = new Blob(chunks, { type: "video/webm" });
-        statusDiv.textContent = `Enregistrement terminé. video_id = ${currentVideoId}`;
+        statusDiv.textContent = `Vidéo prête. video_id = ${currentVideoId}`;
         stopBtn.disabled = true;
         uploadBtn.disabled = false;
     };
 };
 
 uploadBtn.onclick = async () => {
-    if (!recordedBlob || !currentVideoId) {
-        alert("Aucune vidéo enregistrée.");
-        return;
-    }
+    if (!recordedBlob) return;
 
-    statusDiv.textContent = "Upload vidéo en cours…";
+    statusDiv.textContent = "Upload vidéo…";
 
     const videoName = `video_${currentVideoId}.webm`;
 
-    // 1) Upload vidéo
-    const { error: uploadError } = await supabase
-        .storage
-        .from("videos")
-        .upload(videoName, recordedBlob);
+    await supabase.storage.from("videos").upload(videoName, recordedBlob);
 
-    if (uploadError) {
-        console.error(uploadError);
-        statusDiv.textContent = "Erreur upload vidéo.";
-        return;
-    }
+    statusDiv.textContent = "Extraction des frames…";
 
-    statusDiv.textContent = "Extraction des frames et génération des hashes…";
-
-    // 2) Extraction des frames + hashes
     const hashes = await extractFramesFromVideo(recordedBlob, 500);
 
-    // 3) Insertion des hashes avec video_id
-    const rows = hashes.map((h, index) => ({
+    const rows = hashes.map((h, i) => ({
         video_id: currentVideoId,
-        frame_index: index,
+        frame_index: i,
         hash: h
     }));
 
-    const { error: hashError } = await supabase
-        .from("frame_hashes")
-        .insert(rows);
+    await supabase.from("frame_hashes").insert(rows);
 
-    if (hashError) {
-        console.error(hashError);
-        statusDiv.textContent = "Erreur insertion hashes.";
-        return;
-    }
-
-    statusDiv.textContent = `Upload terminé. video_id = ${currentVideoId}, hashes = ${hashes.length}`;
+    statusDiv.textContent = `Terminé. video_id = ${currentVideoId}, frames = ${hashes.length}`;
     uploadBtn.disabled = true;
     recordBtn.disabled = false;
 };
