@@ -1,88 +1,58 @@
-/* Reset léger */
 * {
     box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-    font-family: "Segoe UI", Roboto, Arial, sans-serif;
+    font-family: Arial, Helvetica, sans-serif;
 }
 
-/* Page */
 body {
-    min-height: 100vh;
-    background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
-    color: #f1f1f1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 40px 20px;
+    background: #f4f6f8;
+    color: #222;
+    padding: 40px;
 }
 
 /* Titre */
 h1 {
-    font-size: 2rem;
-    margin-bottom: 30px;
-    letter-spacing: 0.5px;
-    text-align: center;
+    margin-bottom: 25px;
+    font-size: 1.8rem;
 }
 
 /* Vidéo */
 #preview {
-    width: 720px;
+    width: 640px;
     max-width: 100%;
-    border-radius: 10px;
     background: #000;
-    box-shadow: 0 15px 40px rgba(0, 0, 0, 0.6);
-    margin-bottom: 25px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    margin-bottom: 20px;
 }
 
 /* Boutons */
 button {
-    background: #1abc9c;
-    border: none;
-    color: #0f2027;
-    padding: 12px 22px;
-    margin: 0 8px;
+    padding: 10px 18px;
+    margin-right: 10px;
     font-size: 1rem;
-    border-radius: 6px;
+    border-radius: 4px;
+    border: 1px solid #bbb;
+    background: #ffffff;
     cursor: pointer;
-    transition: all 0.25s ease;
-    font-weight: 600;
 }
 
 button:hover:not(:disabled) {
-    background: #16a085;
-    transform: translateY(-1px);
+    background: #eaeaea;
 }
 
 button:disabled {
-    background: #7f8c8d;
-    color: #2c3e50;
+    background: #dddddd;
     cursor: not-allowed;
 }
 
-/* Zone de statut */
+/* Statut */
 #status {
-    margin-top: 25px;
-    padding: 12px 18px;
-    min-height: 45px;
-    width: 720px;
+    margin-top: 20px;
+    padding: 10px;
+    background: #ffffff;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    width: 640px;
     max-width: 100%;
-    background: rgba(0, 0, 0, 0.35);
-    border-left: 4px solid #1abc9c;
-    border-radius: 6px;
     font-size: 0.95rem;
-    display: flex;
-    align-items: center;
-}
-
-/* Responsive */
-@media (max-width: 600px) {
-    h1 {
-        font-size: 1.6rem;
-    }
-
-    button {
-        width: 100%;
-        margin: 8px 0;
-    }
 }
