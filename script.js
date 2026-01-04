@@ -1,4 +1,3 @@
-
 import { supabase } from "./supabaseClient.js";
 
 // Nettoyage des données expirées (> 2 heures)
@@ -198,3 +197,4 @@ window.addEventListener('offline', updateStatusNetwork);
 // Event listeners
 recordBtn.addEventListener("click", startRecording);
 uploadBtn.addEventListener("click", uploadData);
+
