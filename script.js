@@ -3,106 +3,106 @@ import { supabase } from "./supabaseClient.js";
 const video = document.getElementById("preview");
 const recordBtn = document.getElementById("recordBtn");
 const uploadBtn = document.getElementById("uploadBtn");
-const status = document.getElementById("status");
+const statusDiv = document.getElementById("status");
 
 let mediaRecorder;
-let recordedBlobs = [];
-let frames = [];
-let hashList = [];
-let stream;
+let recordedChunks = [];
+let frameHashes = [];
+let localHashesQueue = []; // pour coupures réseau
 
-async function initCamera() {
+// Accès à la caméra
+async function startCamera() {
     try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         video.srcObject = stream;
+        return stream;
     } catch (err) {
-        console.error("Erreur d'accès à la caméra :", err);
-        status.textContent = "Erreur d'accès à la caméra.";
+        statusDiv.textContent = "Erreur caméra : " + err.message;
     }
 }
 
-recordBtn.addEventListener("click", () => {
-    recordedBlobs = [];
-    frames = [];
-    hashList = [];
+// Démarrer l'enregistrement
+recordBtn.addEventListener("click", async () => {
+    const stream = await startCamera();
+    if (!stream) return;
+
+    recordedChunks = [];
+    frameHashes = [];
 
     mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm" });
-    mediaRecorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-            recordedBlobs.push(event.data);
-        }
+
+    mediaRecorder.ondataavailable = e => {
+        if (e.data.size > 0) recordedChunks.push(e.data);
     };
 
-    mediaRecorder.start(100);
-    recordBtn.disabled = true;
+    mediaRecorder.start(100); // chunk toutes les 100ms
+    statusDiv.textContent = "Enregistrement en cours...";
     uploadBtn.disabled = false;
-    status.textContent = "Enregistrement en cours...";
+
+    captureFrames(stream);
 });
 
-// Upload vidéo dans le bucket
-async function uploadVideo(blob) {
-    const fileName = `video_${Date.now()}.webm`;
-    const { data, error } = await supabase.storage
-        .from("videos")
-        .upload(fileName, blob);
+// Capture des frames toutes les 200ms
+function captureFrames(stream) {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    const videoTrack = stream.getVideoTracks()[0];
+    const settings = videoTrack.getSettings();
+    canvas.width = settings.width;
+    canvas.height = settings.height;
 
-    if (error) {
-        console.error("Erreur upload vidéo :", error);
-        status.textContent = "Erreur upload vidéo.";
-        return null;
-    }
-    status.textContent = `Vidéo uploadée dans le bucket : ${fileName}`;
-    return fileName;
-}
-
-// Upload frames et hashs
-async function uploadFramesAndHashes() {
-    status.textContent = "Envoi des frames et hashes...";
-    for (let i = 0; i < frames.length; i++) {
-        try {
-            await supabase
-                .from("frame_hashes")
-                .insert([{ hash: hashList[i] }]);
-        } catch (err) {
-            console.error("Erreur lors de l'upload :", err);
-        }
-    }
-    status.textContent = "Upload des hashs terminé !";
-}
-
-uploadBtn.addEventListener("click", async () => {
-    mediaRecorder.stop();
-    status.textContent = "Enregistrement terminé. Traitement des frames...";
-
-    // création du Blob vidéo
-    const videoBlob = new Blob(recordedBlobs, { type: "video/webm" });
-    video.src = URL.createObjectURL(videoBlob);
-
-    // Upload vidéo dans le bucket
-    await uploadVideo(videoBlob);
-
-    // capture frames pour hash
     const captureInterval = setInterval(async () => {
-        const canvas = document.createElement("canvas");
-        const ctx = canvas.getContext("2d");
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
+        if (mediaRecorder.state !== "recording") {
+            clearInterval(captureInterval);
+            return;
+        }
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const frameData = canvas.toDataURL("image/jpeg");
-        frames.push(frameData);
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+        const hash = await generateHash(blob);
 
-        const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(frameData));
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-        hashList.push(hashHex);
+        frameHashes.push(hash);
+        localHashesQueue.push({ hash, timestamp: new Date().toISOString() });
     }, 200);
+}
 
-    // stop capture après 3 secondes (à ajuster selon la durée)
-    setTimeout(async () => {
-        clearInterval(captureInterval);
-        await uploadFramesAndHashes();
-    }, 3000);
+// Fonction pour générer un hash SHA-256
+async function generateHash(blob) {
+    const arrayBuffer = await blob.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest("SHA-256", arrayBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Upload vidéo + frames + hashes
+uploadBtn.addEventListener("click", async () => {
+    uploadBtn.disabled = true;
+    const videoBlob = new Blob(recordedChunks, { type: "video/webm" });
+    const videoName = `videos/video_${Date.now()}.webm`;
+
+    // Upload vidéo
+    const { data: videoData, error: videoError } = await supabase.storage
+        .from("videos")
+        .upload(videoName, videoBlob);
+
+    if (videoError) {
+        statusDiv.textContent = "Erreur upload vidéo : " + videoError.message;
+        return;
+    }
+
+    // Upload des hash
+    for (let h of localHashesQueue) {
+        await supabase.from("frame_hashes").insert({ hash: h.hash });
+    }
+
+    localHashesQueue = []; // reset queue
+    statusDiv.textContent = "Upload terminé avec succès !";
 });
 
-// initialisation
-initCamera();
+// Gestion suppression données expirées côté client
+function cleanOldHashes() {
+    const TWO_HOURS = 2 * 60 * 60 * 1000;
+    const now = new Date();
+    frameHashes = frameHashes.filter(f => now - new Date(f.timestamp) < TWO_HOURS);
+}
+
+setInterval(cleanOldHashes, 60 * 1000); // nettoyage toutes les 1 min
