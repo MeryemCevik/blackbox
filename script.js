@@ -10,20 +10,20 @@ const statusDiv = document.getElementById("status");
 let mediaRecorder;
 let recordedChunks = [];
 let frameHashes = [];
-let tempHashes = []; // stockage côté client en cas de coupure réseau
+let tempHashes = []; // stockage temporaire en cas de panne réseau
 let captureInterval;
 let frameCount = 0;
 
-// Paramètre redondance
-const REDUNDANCY = 3;
+// Paramètres
+const REDUNDANCY = 2;          // nombre de répétitions
+const CAPTURE_INTERVAL = 500;  // ms entre deux frames
 
-// Statut réseau + compteur frames
 function updateStatusNetwork() {
     const status = navigator.onLine ? "en ligne" : "hors ligne";
     statusDiv.textContent = `Frames : ${frameCount} | Statut réseau : ${status}`;
 }
 
-// Capture frames + hash + redondance
+// Capture frame + hash + timestamp
 async function captureFrameHash() {
     if (!video.videoWidth || !video.videoHeight) return;
 
@@ -39,12 +39,11 @@ async function captureFrameHash() {
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
-    const timestamp = new Date().toISOString();
+    const timestamp = Date.now();
 
-    // ✅ Redondance simple
     for (let i = 0; i < REDUNDANCY; i++) {
-        frameHashes.push({ created_at: timestamp, hash: hashHex });
-        tempHashes.push({ created_at: timestamp, hash: hashHex });
+        frameHashes.push({ created_at: new Date(timestamp).toISOString(), hash: hashHex, timestamp });
+        tempHashes.push({ created_at: new Date(timestamp).toISOString(), hash: hashHex, timestamp });
     }
 
     frameCount++;
@@ -63,7 +62,7 @@ async function startRecording() {
         };
         mediaRecorder.start(100);
 
-        captureInterval = setInterval(captureFrameHash, 500);
+        captureInterval = setInterval(captureFrameHash, CAPTURE_INTERVAL);
 
         recordBtn.disabled = true;
         uploadBtn.disabled = false;
@@ -83,7 +82,7 @@ async function uploadData() {
     const videoBlob = new Blob(recordedChunks, { type: 'video/webm' });
     const videoName = `video_${Date.now()}.webm`;
 
-    const { data: videoData, error: videoError } = await supabase
+    const { error: videoError } = await supabase
         .storage
         .from('videos')
         .upload(videoName, videoBlob);
