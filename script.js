@@ -10,20 +10,19 @@ const statusDiv = document.getElementById("status");
 let mediaRecorder;
 let recordedChunks = [];
 let frameHashes = [];
-let tempHashes = []; // stockage temporaire en cas de panne réseau
+let tempHashes = [];
 let captureInterval;
 let frameCount = 0;
 
-// Paramètres
-const REDUNDANCY = 2;          // nombre de répétitions
-const CAPTURE_INTERVAL = 500;  // ms entre deux frames
+const REDUNDANCY = 2;
+const CAPTURE_INTERVAL = 500;
 
 function updateStatusNetwork() {
     const status = navigator.onLine ? "en ligne" : "hors ligne";
     statusDiv.textContent = `Frames : ${frameCount} | Statut réseau : ${status}`;
 }
 
-// Capture frame + hash + timestamp
+// Capture frame + hash + created_at
 async function captureFrameHash() {
     if (!video.videoWidth || !video.videoHeight) return;
 
@@ -39,18 +38,18 @@ async function captureFrameHash() {
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
-    const timestamp = Date.now();
+    const created_at = new Date().toISOString();
 
     for (let i = 0; i < REDUNDANCY; i++) {
-        frameHashes.push({ created_at: new Date(timestamp).toISOString(), hash: hashHex, timestamp });
-        tempHashes.push({ created_at: new Date(timestamp).toISOString(), hash: hashHex, timestamp });
+        frameHashes.push({ created_at, hash: hashHex });
+        tempHashes.push({ created_at, hash: hashHex });
     }
 
     frameCount++;
     updateStatusNetwork();
 }
 
-// Démarrer enregistrement
+// Démarrer l'enregistrement
 async function startRecording() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
