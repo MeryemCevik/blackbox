@@ -1,78 +1,88 @@
+/* Reset léger */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    font-family: "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+/* Page */
 body {
-  font-family: Arial, sans-serif;
-  padding: 20px;
-  text-align: center;
-  background: #f5f5f5;
+    min-height: 100vh;
+    background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+    color: #f1f1f1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px;
 }
 
+/* Titre */
 h1 {
-  color: #333;
+    font-size: 2rem;
+    margin-bottom: 30px;
+    letter-spacing: 0.5px;
+    text-align: center;
 }
 
+/* Vidéo */
 #preview {
-  width: 90%;
-  max-width: 400px;
-  background: #000;
-  border-radius: 8px;
-  margin-bottom: 20px;
-  border: 2px solid #444;
+    width: 720px;
+    max-width: 100%;
+    border-radius: 10px;
+    background: #000;
+    box-shadow: 0 15px 40px rgba(0, 0, 0, 0.6);
+    margin-bottom: 25px;
 }
 
+/* Boutons */
 button {
-  padding: 12px 20px;
-  margin: 10px;
-  font-size: 16px;
-  cursor: pointer;
-  border-radius: 5px;
-  border: none;
-  transition: background 0.3s;
+    background: #1abc9c;
+    border: none;
+    color: #0f2027;
+    padding: 12px 22px;
+    margin: 0 8px;
+    font-size: 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    font-weight: 600;
 }
 
-#recordBtn {
-  background-color: #28a745;
-  color: #fff;
-}
-
-#recordBtn.recording {
-  background-color: #dc3545;
-  animation: pulse 1s infinite;
-}
-
-#uploadBtn {
-  background-color: #007bff;
-  color: #fff;
+button:hover:not(:disabled) {
+    background: #16a085;
+    transform: translateY(-1px);
 }
 
 button:disabled {
-  background-color: #ccc;
-  cursor: not-allowed;
+    background: #7f8c8d;
+    color: #2c3e50;
+    cursor: not-allowed;
 }
 
-@keyframes pulse {
-  0% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.7); }
-  70% { box-shadow: 0 0 0 10px rgba(220, 53, 69, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0); }
-}
-
+/* Zone de statut */
 #status {
-  margin-top: 15px;
-  font-weight: bold;
+    margin-top: 25px;
+    padding: 12px 18px;
+    min-height: 45px;
+    width: 720px;
+    max-width: 100%;
+    background: rgba(0, 0, 0, 0.35);
+    border-left: 4px solid #1abc9c;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
 }
 
-.infoBox {
-  background: #fff;
-  border-radius: 8px;
-  padding: 10px 15px;
-  margin-top: 20px;
-  display: inline-block;
-  text-align: left;
-  border: 1px solid #ccc;
-}
+/* Responsive */
+@media (max-width: 600px) {
+    h1 {
+        font-size: 1.6rem;
+    }
 
-.infoBox p {
-  margin: 5px 0;
+    button {
+        width: 100%;
+        margin: 8px 0;
+    }
 }
-
-.status-success { color: green; }
-.status-error { color: red; }
-.status-warning { color: orange; }
