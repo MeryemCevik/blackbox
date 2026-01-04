@@ -1,11 +1,12 @@
 import { supabase } from "./supabaseClient.js";
 
-// DOM Elements
+// DOM
 const video = document.getElementById("preview");
 const recordBtn = document.getElementById("recordBtn");
 const uploadBtn = document.getElementById("uploadBtn");
 const statusDiv = document.getElementById("status");
 
+// Variables
 let mediaRecorder;
 let recordedChunks = [];
 let frameHashes = [];
@@ -13,11 +14,11 @@ let tempHashes = [];
 let captureInterval;
 let frameCount = 0;
 
-// Grille D-Hash
+// D-Hash 9x8
 const DHASH_WIDTH = 9;
 const DHASH_HEIGHT = 8;
 
-// Convertit une canvas en D-Hash (luminance)
+// Calcul D-Hash
 async function computeDHash(canvas) {
     const ctx = canvas.getContext("2d");
     const imgData = ctx.getImageData(0, 0, DHASH_WIDTH, DHASH_HEIGHT);
@@ -34,14 +35,13 @@ async function computeDHash(canvas) {
     return hash;
 }
 
-// Capture une frame et calcule le D-Hash
+// Capture frame
 async function captureFrame() {
     if (!video.videoWidth || !video.videoHeight) return;
 
     const canvas = document.createElement("canvas");
     canvas.width = DHASH_WIDTH;
     canvas.height = DHASH_HEIGHT;
-
     const ctx = canvas.getContext("2d");
     ctx.drawImage(video, 0, 0, DHASH_WIDTH, DHASH_HEIGHT);
 
@@ -55,7 +55,7 @@ async function captureFrame() {
     statusDiv.textContent = `Frames : ${frameCount}`;
 }
 
-// Démarrer l'enregistrement vidéo
+// Start Recording
 async function startRecording() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
@@ -65,7 +65,7 @@ async function startRecording() {
         mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
         mediaRecorder.start(100);
 
-        captureInterval = setInterval(captureFrame, 1000); // 1 hash/sec
+        captureInterval = setInterval(captureFrame, 500); // 2 frames/sec
 
         recordBtn.disabled = true;
         uploadBtn.disabled = false;
@@ -75,7 +75,7 @@ async function startRecording() {
     }
 }
 
-// Upload vidéo + hashes
+// Upload
 async function uploadData() {
     clearInterval(captureInterval);
     mediaRecorder.stop();
@@ -94,9 +94,8 @@ async function uploadData() {
 
     try {
         const { error: hashError } = await supabase.from("frame_hashes").insert(frameHashes);
-        if (hashError) {
-            console.error("Erreur insertion hashes :", hashError);
-        } else {
+        if (hashError) console.error("Erreur insertion hashes :", hashError);
+        else {
             tempHashes = [];
             frameHashes = [];
             recordedChunks = [];
@@ -106,6 +105,6 @@ async function uploadData() {
     } catch (err) { console.error(err); }
 }
 
-// Event listeners
+// Events
 recordBtn.addEventListener("click", startRecording);
 uploadBtn.addEventListener("click", uploadData);
