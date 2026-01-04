@@ -2,7 +2,7 @@ import { supabase } from "./supabaseClient.js";
 
 // Paramètre redondance
 const REDUNDANCY = 3;
-
+/*
 // Nettoyage des données expirées (> 2 heures)
 async function cleanExpiredData() {
     console.log("Nettoyage des données expirées…");
@@ -43,7 +43,7 @@ async function cleanExpiredData() {
     if (deleteError) console.error("Erreur suppression vidéos :", deleteError);
     else console.log(`Vidéos supprimées : ${paths.length}`);
 }
-
+*/
 // DOM Elements
 const video = document.getElementById("preview");
 const recordBtn = document.getElementById("recordBtn");
@@ -59,7 +59,7 @@ let captureInterval;
 let frameCount = 0;
 
 // Nettoyage automatique au démarrage
-cleanExpiredData();
+//cleanExpiredData();
 
 // Statut réseau + compteur frames
 function updateStatusNetwork() {
@@ -165,3 +165,4 @@ window.addEventListener('offline', updateStatusNetwork);
 // Event listeners
 recordBtn.addEventListener("click", startRecording);
 uploadBtn.addEventListener("click", uploadData);
+
