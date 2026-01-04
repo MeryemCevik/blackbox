@@ -1,4 +1,3 @@
-// script.js pour l'encodeur
 import { supabase } from "./supabaseClient.js";
 
 const video = document.getElementById("preview");
@@ -12,7 +11,6 @@ let frames = [];
 let hashList = [];
 let stream;
 
-// Fonction pour initialiser la caméra
 async function initCamera() {
     try {
         stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
@@ -23,50 +21,41 @@ async function initCamera() {
     }
 }
 
-// Démarrage de l'enregistrement
 recordBtn.addEventListener("click", () => {
     recordedBlobs = [];
     frames = [];
     hashList = [];
 
     mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm" });
-
     mediaRecorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
             recordedBlobs.push(event.data);
         }
     };
 
-    mediaRecorder.start(100); // dataavailable tous les 100ms
+    mediaRecorder.start(100);
     recordBtn.disabled = true;
     uploadBtn.disabled = false;
     status.textContent = "Enregistrement en cours...";
 });
 
-// Capture des frames et génération de hash
-function captureFrames() {
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
+// Upload vidéo dans le bucket
+async function uploadVideo(blob) {
+    const fileName = `video_${Date.now()}.webm`;
+    const { data, error } = await supabase.storage
+        .from("videos")
+        .upload(fileName, blob);
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-
-    // capture frame
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const frameData = canvas.toDataURL("image/jpeg");
-    frames.push(frameData);
-
-    // génération hash simple avec SHA-256
-    return crypto.subtle.digest("SHA-256", new TextEncoder().encode(frameData))
-        .then(hashBuffer => {
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-            hashList.push(hashHex);
-            return hashHex;
-        });
+    if (error) {
+        console.error("Erreur upload vidéo :", error);
+        status.textContent = "Erreur upload vidéo.";
+        return null;
+    }
+    status.textContent = `Vidéo uploadée dans le bucket : ${fileName}`;
+    return fileName;
 }
 
-// Upload frames et hashes sur Supabase
+// Upload frames et hashs
 async function uploadFramesAndHashes() {
     status.textContent = "Envoi des frames et hashes...";
     for (let i = 0; i < frames.length; i++) {
@@ -78,30 +67,42 @@ async function uploadFramesAndHashes() {
             console.error("Erreur lors de l'upload :", err);
         }
     }
-    status.textContent = "Upload terminé !";
+    status.textContent = "Upload des hashs terminé !";
 }
 
-// Bouton pour upload
 uploadBtn.addEventListener("click", async () => {
     mediaRecorder.stop();
     status.textContent = "Enregistrement terminé. Traitement des frames...";
-    
-    // capture frames pour chaque Blob (simplification)
-    const videoBlob = new Blob(recordedBlobs, { type: "video/webm" });
-    const videoURL = URL.createObjectURL(videoBlob);
-    video.src = videoURL;
 
-    // capture frames toutes les 200ms environ
+    // création du Blob vidéo
+    const videoBlob = new Blob(recordedBlobs, { type: "video/webm" });
+    video.src = URL.createObjectURL(videoBlob);
+
+    // Upload vidéo dans le bucket
+    await uploadVideo(videoBlob);
+
+    // capture frames pour hash
     const captureInterval = setInterval(async () => {
-        await captureFrames();
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const frameData = canvas.toDataURL("image/jpeg");
+        frames.push(frameData);
+
+        const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(frameData));
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        hashList.push(hashHex);
     }, 200);
 
-    // stop capture après 3 secondes (ou adapter selon la longueur vidéo)
+    // stop capture après 3 secondes (à ajuster selon la durée)
     setTimeout(async () => {
         clearInterval(captureInterval);
         await uploadFramesAndHashes();
     }, 3000);
 });
 
-// initialisation caméra
+// initialisation
 initCamera();
