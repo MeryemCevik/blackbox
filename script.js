@@ -1,49 +1,5 @@
 import { supabase } from "./supabaseClient.js";
 
-// Paramètre redondance
-const REDUNDANCY = 3;
-/*
-// Nettoyage des données expirées (> 2 heures)
-async function cleanExpiredData() {
-    console.log("Nettoyage des données expirées…");
-    const limitDate = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
-
-    // 1) Suppression des hashes
-    const { error: hashError } = await supabase
-        .from("frame_hashes")
-        .delete()
-        .lt("created_at", limitDate);
-
-    if (hashError) console.error("Erreur suppression hashes :", hashError);
-    else console.log("Hashes expirés supprimés");
-
-    // 2) Suppression vidéos expirées
-    const { data: files, error: listError } = await supabase
-        .storage
-        .from("videos")
-        .list();
-
-    if (listError) return console.error("Erreur liste vidéos :", listError);
-
-    const expiredVideos = files.filter(file => {
-        const match = file.name.match(/video_(\d+)\.webm/);
-        if (!match) return false;
-        const timestamp = Number(match[1]);
-        return timestamp < Date.now() - 2 * 60 * 60 * 1000;
-    });
-
-    if (expiredVideos.length === 0) return console.log("Aucune vidéo expirée");
-
-    const paths = expiredVideos.map(v => v.name);
-    const { error: deleteError } = await supabase
-        .storage
-        .from("videos")
-        .remove(paths);
-
-    if (deleteError) console.error("Erreur suppression vidéos :", deleteError);
-    else console.log(`Vidéos supprimées : ${paths.length}`);
-}
-*/
 // DOM Elements
 const video = document.getElementById("preview");
 const recordBtn = document.getElementById("recordBtn");
@@ -54,12 +10,12 @@ const statusDiv = document.getElementById("status");
 let mediaRecorder;
 let recordedChunks = [];
 let frameHashes = [];
-let tempHashes = [];
+let tempHashes = []; // stockage côté client en cas de coupure réseau
 let captureInterval;
 let frameCount = 0;
 
-// Nettoyage automatique au démarrage
-//cleanExpiredData();
+// Paramètre redondance
+const REDUNDANCY = 3;
 
 // Statut réseau + compteur frames
 function updateStatusNetwork() {
@@ -84,6 +40,8 @@ async function captureFrameHash() {
     const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
     const timestamp = new Date().toISOString();
+
+    // ✅ Redondance simple
     for (let i = 0; i < REDUNDANCY; i++) {
         frameHashes.push({ created_at: timestamp, hash: hashHex });
         tempHashes.push({ created_at: timestamp, hash: hashHex });
@@ -138,16 +96,21 @@ async function uploadData() {
 
     statusDiv.textContent = "Vidéo uploadée avec succès !";
 
-    const { error: hashError } = await supabase.from('frame_hashes').insert(frameHashes);
-    if (hashError) {
-        console.error("Erreur insertion hashes:", hashError);
-        statusDiv.textContent = "Erreur lors de l'envoi des hashes. Stockage côté client activé.";
-    } else {
-        statusDiv.textContent = "Hashes uploadés avec succès !";
-        tempHashes = [];
-        frameHashes = [];
-        recordedChunks = [];
-        frameCount = 0;
+    try {
+        const { error: hashError } = await supabase.from('frame_hashes').insert(frameHashes);
+
+        if (hashError) {
+            console.error("Erreur insertion hashes:", hashError);
+            statusDiv.textContent = "Erreur lors de l'envoi des hashes. Stockage côté client activé.";
+        } else {
+            statusDiv.textContent = "Hashes uploadés avec succès !";
+            tempHashes = [];
+            frameHashes = [];
+            recordedChunks = [];
+            frameCount = 0;
+        }
+    } catch (err) {
+        console.error(err);
     }
 }
 
@@ -155,9 +118,16 @@ async function uploadData() {
 window.addEventListener('online', async () => {
     updateStatusNetwork();
     if (tempHashes.length > 0) {
-        statusDiv.textContent = "Connexion rétablie, envoi des hashes sauvegardés...";
-        const { error } = await supabase.from('frame_hashes').insert(tempHashes);
-        if (!error) tempHashes = [], statusDiv.textContent = "Hashes temporaires uploadés avec succès !";
+        statusDiv.textContent = "Connexion réseau rétablie, envoi des hashes sauvegardés...";
+        try {
+            const { error } = await supabase.from('frame_hashes').insert(tempHashes);
+            if (!error) {
+                tempHashes = [];
+                statusDiv.textContent = "Hashes temporaires uploadés avec succès !";
+            }
+        } catch (err) {
+            console.error("Erreur upload tempHashes:", err);
+        }
     }
 });
 window.addEventListener('offline', updateStatusNetwork);
@@ -165,4 +135,3 @@ window.addEventListener('offline', updateStatusNetwork);
 // Event listeners
 recordBtn.addEventListener("click", startRecording);
 uploadBtn.addEventListener("click", uploadData);
-
