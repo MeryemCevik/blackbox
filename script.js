@@ -1,5 +1,66 @@
 import { supabase } from "./supabaseClient.js";
 
+// Nettoyage des données expirées (> 2 heures)
+async function cleanExpiredData() {
+    console.log("Nettoyage des données expirées…");
+
+    const limitDate = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+
+    /* =========================
+       1) SUPPRESSION DES HASHES
+       ========================= */
+    const { error: hashError } = await supabase
+        .from("frame_hashes")
+        .delete()
+        .lt("created_at", limitDate);
+
+    if (hashError) {
+        console.error("Erreur suppression hashes :", hashError);
+    } else {
+        console.log("Hashes expirés supprimés");
+    }
+
+    /* =========================
+       2) SUPPRESSION DES VIDÉOS
+       ========================= */
+    const { data: files, error: listError } = await supabase
+        .storage
+        .from("videos")
+        .list();
+
+    if (listError) {
+        console.error("Erreur liste vidéos :", listError);
+        return;
+    }
+
+    const expiredVideos = files.filter(file => {
+        // video_1699999999999.webm
+        const match = file.name.match(/video_(\d+)\.webm/);
+        if (!match) return false;
+
+        const timestamp = Number(match[1]);
+        return timestamp < Date.now() - 2 * 60 * 60 * 1000;
+    });
+
+    if (expiredVideos.length === 0) {
+        console.log("Aucune vidéo expirée");
+        return;
+    }
+
+    const paths = expiredVideos.map(v => v.name);
+
+    const { error: deleteError } = await supabase
+        .storage
+        .from("videos")
+        .remove(paths);
+
+    if (deleteError) {
+        console.error("Erreur suppression vidéos :", deleteError);
+    } else {
+        console.log(`Vidéos supprimées : ${paths.length}`);
+    }
+}
+
 // DOM Elements
 const video = document.getElementById("preview");
 const recordBtn = document.getElementById("recordBtn");
@@ -13,6 +74,8 @@ let frameHashes = [];
 let tempHashes = []; // stockage côté client en cas de coupure réseau
 let captureInterval;
 let frameCount = 0;
+// Nettoyage automatique au démarrage
+cleanExpiredData();
 
 // D-Hash 9x8
 const DHASH_WIDTH = 9;
@@ -167,5 +230,6 @@ window.addEventListener('offline', updateStatusNetwork);
 // -------------------------------
 recordBtn.addEventListener("click", startRecording);
 uploadBtn.addEventListener("click", uploadData);
+
 
 
