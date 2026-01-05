@@ -162,7 +162,7 @@ async function uploadData() {
 // -------------------------------
 window.addEventListener('online', async () => {
     updateStatusNetwork();
-    console.log("🌐 Connexion rétablie");
+    console.log("Connexion rétablie");
 
     if (tempHashes.length > 0) {
         statusDiv.textContent = "Connexion rétablie, envoi des hashes sauvegardés...";
