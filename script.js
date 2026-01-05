@@ -1,16 +1,20 @@
 import { supabase } from "./supabaseClient.js";
 
+// -------------------------------
 // DOM Elements
+// -------------------------------
 const video = document.getElementById("preview");
 const recordBtn = document.getElementById("recordBtn");
 const uploadBtn = document.getElementById("uploadBtn");
 const statusDiv = document.getElementById("status");
 
-// Variables
+// -------------------------------
+// Variables globales
+// -------------------------------
 let mediaRecorder;
 let recordedChunks = [];
-let frameHashes = [];
-let tempHashes = []; // stockage côté client en cas de coupure réseau
+let frameHashes = [];   // Hashes prêts à être envoyés au serveur
+let tempHashes = [];    // Stockage côté client en cas de coupure réseau
 let captureInterval;
 let frameCount = 0;
 
@@ -18,14 +22,16 @@ let frameCount = 0;
 const DHASH_WIDTH = 9;
 const DHASH_HEIGHT = 8;
 
-// Statut réseau + compteur de frames
+// -------------------------------
+// Statut réseau et compteur de frames
+// -------------------------------
 function updateStatusNetwork() {
     const status = navigator.onLine ? "en ligne" : "hors ligne";
     statusDiv.textContent = `Frames : ${frameCount} | Statut réseau : ${status}`;
 }
 
 // -------------------------------
-// Calcul D-Hash
+// Calcul D-Hash d'une frame
 // -------------------------------
 async function computeDHash(canvas) {
     const ctx = canvas.getContext("2d");
@@ -44,7 +50,7 @@ async function computeDHash(canvas) {
 }
 
 // -------------------------------
-// Capture frame et calcul hash
+// Capture une frame, calcule hash et envoie dynamique
 // -------------------------------
 async function captureFrameHash() {
     if (!video.videoWidth || !video.videoHeight) return;
@@ -58,16 +64,32 @@ async function captureFrameHash() {
     const dHash = await computeDHash(canvas);
     const timestamp = new Date().toISOString();
 
-    // Stockage des hashes côté serveur et temporaire
-    frameHashes.push({ created_at: timestamp, hash: dHash });
-    tempHashes.push({ created_at: timestamp, hash: dHash });
+    const frame = { created_at: timestamp, hash: dHash };
+    frameHashes.push(frame);
+    tempHashes.push(frame);
 
     frameCount++;
     updateStatusNetwork();
+
+    // -------------------------------
+    // Transmission dynamique des hashes
+    // -------------------------------
+    if (navigator.onLine && frameHashes.length >= 5) { // envoyer par paquets de 5 frames
+        try {
+            const { error } = await supabase.from('frame_hashes').insert(frameHashes);
+            if (!error) {
+                frameHashes = []; // reset du paquet envoyé
+            } else {
+                console.error("Erreur envoi dynamique :", error);
+            }
+        } catch (err) {
+            console.error("Exception envoi dynamique :", err);
+        }
+    }
 }
 
 // -------------------------------
-// Démarrer l'enregistrement
+// Démarrage de l'enregistrement
 // -------------------------------
 async function startRecording() {
     try {
@@ -91,7 +113,7 @@ async function startRecording() {
 }
 
 // -------------------------------
-// Upload vidéo et hashes
+// Upload final vidéo + hashes restants
 // -------------------------------
 async function uploadData() {
     clearInterval(captureInterval);
@@ -99,11 +121,11 @@ async function uploadData() {
     recordBtn.disabled = false;
     uploadBtn.disabled = true;
 
+    // Upload vidéo
     const videoBlob = new Blob(recordedChunks, { type: 'video/webm' });
     const videoName = `video_${Date.now()}.webm`;
-
-    // Upload vidéo
     const { error: videoError } = await supabase.storage.from('videos').upload(videoName, videoBlob);
+
     if (videoError) {
         console.error("Erreur upload vidéo:", videoError);
         statusDiv.textContent = "Erreur lors de l'envoi de la vidéo. Hashes sauvegardés localement.";
@@ -112,26 +134,25 @@ async function uploadData() {
 
     statusDiv.textContent = "Vidéo uploadée avec succès !";
 
-    // Upload hashes
-    try {
-        const { error: hashError } = await supabase.from('frame_hashes').insert(frameHashes);
-        if (hashError) {
-            console.error("Erreur insertion hashes:", hashError);
-            statusDiv.textContent = "Erreur lors de l'envoi des hashes. Stockage côté client activé.";
-        } else {
-            tempHashes = [];
-            frameHashes = [];
-            recordedChunks = [];
-            frameCount = 0;
-            statusDiv.textContent = "Hashes uploadés avec succès !";
-        }
-    } catch (err) {
-        console.error(err);
+    // Upload des hashes restants
+    if (frameHashes.length > 0) {
+        try {
+            const { error: hashError } = await supabase.from('frame_hashes').insert(frameHashes);
+            if (hashError) {
+                console.error("Erreur insertion hashes :", hashError);
+            }
+        } catch (err) { console.error(err); }
     }
+
+    // Reset local
+    tempHashes = [];
+    frameHashes = [];
+    recordedChunks = [];
+    frameCount = 0;
 }
 
 // -------------------------------
-// Gestion réseau
+// Gestion réseau pour envoyer les hashes temporaires
 // -------------------------------
 window.addEventListener('online', async () => {
     updateStatusNetwork();
