@@ -81,7 +81,9 @@ async function captureFrameHash() {
     ctx.drawImage(video, 0, 0, DHASH_WIDTH, DHASH_HEIGHT);
 
     const dHash = await computeDHash(canvas);
-    const timestamp = new Date().toISOString();
+    const now = new Date();
+    const timestamp = now.toISOString().slice(0, 19).replace("T", " "); // garde UTC mais format SQL
+
 
     const hashObj = { created_at: timestamp, hash: dHash };
     frameHashes.push(hashObj);
@@ -165,3 +167,4 @@ window.addEventListener('offline', updateStatusNetwork);
 // -------------------------------
 recordBtn.addEventListener("click", startRecording);
 uploadBtn.addEventListener("click", uploadData);
+
